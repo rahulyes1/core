@@ -47,6 +47,9 @@ function CaptureContent() {
     const [showEphemeral, setShowEphemeral] = useState(false);
     const [lockedUntil, setLockedUntil] = useState<string | null>(null);
     const [isListening, setIsListening] = useState(false);
+    const [linkQuery, setLinkQuery] = useState<string | null>(null);
+    const [linkResults, setLinkResults] = useState<{ id: string, title: string }[]>([]);
+    const [linkRange, setLinkRange] = useState<{ from: number, to: number } | null>(null);
     const recognitionRef = useRef<any>(null);
     const { result: aiResult, loading: aiLoading } = useAI(content);
 
@@ -69,8 +72,57 @@ function CaptureContent() {
         },
         onUpdate: ({ editor }) => {
             setContent(editor.getHTML());
+            // Link detection
+            const { state } = editor;
+            const { selection } = state;
+            const { $from } = selection;
+            const textBefore = $from.parent.textBetween(Math.max(0, $from.parentOffset - 20), $from.parentOffset, '\n', '\uFFFC');
+            const match = textBefore.match(/\[\[([^\]]*)$/);
+
+            if (match) {
+                const query = match[1];
+                setLinkQuery(query);
+                setLinkRange({ from: $from.pos - query.length - 2, to: $from.pos });
+            } else {
+                setLinkQuery(null);
+                setLinkRange(null);
+            }
         },
     });
+
+    // Fetch link suggestions
+    useEffect(() => {
+        if (linkQuery === null) { setLinkResults([]); return; }
+        const fetchLinks = async () => {
+            const { data } = await supabase
+                .from('notes')
+                .select('id, title, content')
+                .or(`title.ilike.%${linkQuery}%,content.ilike.%${linkQuery}%`)
+                .limit(5);
+
+            if (data) {
+                setLinkResults(data.map((n: any) => ({
+                    id: n.id,
+                    title: n.title || n.content.replace(/<[^>]*>/g, '').slice(0, 20) || 'Untitled'
+                })));
+            }
+        };
+        const timer = setTimeout(fetchLinks, 300);
+        return () => clearTimeout(timer);
+    }, [linkQuery]);
+
+    const insertLink = (note: { id: string, title: string }) => {
+        if (!editor || !linkRange) return;
+        editor
+            .chain()
+            .focus()
+            .deleteRange(linkRange)
+            .setMark('textStyle', { color: '#2b6cee' })
+            .insertContent(`<a href="/capture?id=${note.id}" style="color: #2b6cee; text-decoration: none; background: rgba(43, 108, 238, 0.1); padding: 0 4px; border-radius: 4px;">@${note.title}</a> `)
+            .unsetMark('textStyle')
+            .run();
+        setLinkQuery(null);
+    };
 
     // Load existing note
     useEffect(() => {
@@ -299,6 +351,25 @@ function CaptureContent() {
                     ))}
                 </div>
             </div>
+
+            {/* Link Autocomplete Dropdown */}
+            <AnimatePresence>
+                {linkQuery !== null && linkResults.length > 0 && (
+                    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }}
+                        className="fixed bottom-20 left-4 right-4 z-40 bg-[#1e1e1e] border border-white/10 rounded-xl shadow-2xl overflow-hidden max-h-48 overflow-y-auto"
+                    >
+                        <p className="text-[10px] text-gray-500 px-3 py-2 border-b border-white/5 bg-[#121212]">Link to note</p>
+                        {linkResults.map(note => (
+                            <button key={note.id} onClick={() => insertLink(note)}
+                                className="w-full text-left px-4 py-3 hover:bg-white/5 transition-colors border-b border-white/5 last:border-0 flex items-center gap-2"
+                            >
+                                <span className="material-symbols-outlined text-gray-500 text-[16px]">description</span>
+                                <span className="text-sm text-gray-200 truncate">{note.title}</span>
+                            </button>
+                        ))}
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
             {/* Formatting toolbar */}
             {editor && (

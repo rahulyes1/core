@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import NoteCard from './NoteCard';
+import SmartMergeCard from '../SmartMergeCard';
 import { supabase } from '@/utils/supabase/client';
 
 interface Note {
@@ -189,13 +190,18 @@ export default function NoteFeed() {
                         </div>
                     )}
 
+                    {/* Smart Merge */}
+                    {notes.length >= 3 && (
+                        <SmartMergeCard key="smart-merge" notes={notes} onMerge={fetchNotes} />
+                    )}
+
                     {/* Filter Chips */}
                     <div className="flex gap-3 overflow-x-auto no-scrollbar pb-1">
                         {ALL_TAGS.map(tag => (
                             <button key={tag} onClick={() => setActiveTag(tag)}
                                 className={`flex h-8 shrink-0 items-center justify-center gap-x-2 rounded-full px-4 transition-all active:scale-95 text-sm font-medium ${activeTag === tag
-                                        ? 'bg-white text-black font-semibold'
-                                        : 'bg-[#1e1e1e] border border-white/5 text-gray-300 hover:bg-white/5'
+                                    ? 'bg-white text-black font-semibold'
+                                    : 'bg-[#1e1e1e] border border-white/5 text-gray-300 hover:bg-white/5'
                                     }`}
                             >{tag}</button>
                         ))}
