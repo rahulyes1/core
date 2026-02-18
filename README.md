@@ -1,36 +1,55 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Core PWA Notes App
 
-## Getting Started
+Core is a sleek, dark-themed PWA notes application built with Next.js, Tailwind CSS, Supabase, and Gemini AI.
 
-First, run the development server:
+## Features
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+- **Dark Mode UI**: Minimalist aesthetic with #0a0a0a background.
+- **Offline First**: PWA support with service worker caching.
+- **Real-time Sync**: Notes update instantly across devices using Supabase Realtime.
+- **AI Powered**: Auto-tagging and summarization using Google Gemini Flash.
+- **Rich Capture**: Floating formatting toolbar, auto-save, and easy formatting.
+- **Gestures**: Swipe to pin or archive notes on the home screen.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Setup
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. **Install Dependencies**:
+   ```bash
+   npm install
+   ```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+2. **Environment Variables**:
+   Create a `.env.local` file with the following:
+   ```env
+   NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+   NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+   GEMINI_API_KEY=your_gemini_api_key
+   ```
 
-## Learn More
+3. **Database Setup**:
+   Run the SQL script found in `supabase/schema.sql` in your Supabase SQL Editor to create the necessary tables and policies.
 
-To learn more about Next.js, take a look at the following resources:
+4. **Run Locally**:
+   ```bash
+   npm run dev
+   ```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+5. **Build for Production**:
+   ```bash
+   npm run build
+   ```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Tech Stack
 
-## Deploy on Vercel
+- **Framework**: Next.js 16 (App Router)
+- **Styling**: Tailwind CSS v4
+- **Database**: Supabase (PostgreSQL)
+- **AI**: Google Gemini (generative-ai)
+- **Editor**: Tiptap
+- **Animations**: Framer Motion
+- **Icons**: Lucide React
+- **PWA**: next-pwa
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## License
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+MIT
