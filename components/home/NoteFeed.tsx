@@ -25,14 +25,10 @@ export default function NoteFeed() {
 
     useEffect(() => {
         fetchNotes();
-
         const channel = supabase
             .channel('realtime notes')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'notes' }, () => {
-                fetchNotes();
-            })
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'notes' }, () => fetchNotes())
             .subscribe();
-
         return () => { supabase.removeChannel(channel); };
     }, []);
 
@@ -46,12 +42,10 @@ export default function NoteFeed() {
                 .order('created_at', { ascending: false });
 
             if (error) throw error;
-
             const formattedNotes = data.map((n: any) => ({
                 ...n,
-                tags: n.note_tags.map((nt: any) => nt.tags.name)
+                tags: n.note_tags?.map((nt: any) => nt.tags?.name).filter(Boolean) ?? []
             }));
-
             setNotes(formattedNotes);
         } catch (error: any) {
             console.error('Error fetching notes:', error.message || error);
@@ -73,13 +67,17 @@ export default function NoteFeed() {
         await supabase.from('notes').update({ is_archived: true }).eq('id', id);
     };
 
+    const handleDelete = async (id: string) => {
+        setNotes(prev => prev.filter(n => n.id !== id));
+        await supabase.from('notes').delete().eq('id', id);
+    };
+
     const filteredNotes = activeTag === 'All'
         ? notes
         : notes.filter(n => n.tags.some(t => `#${t}` === activeTag));
 
     return (
         <>
-            {/* Main scrollable content */}
             <main className="flex-1 overflow-y-auto pb-24 pt-16">
                 <div className="px-4 pb-6 space-y-6">
 
@@ -95,14 +93,18 @@ export default function NoteFeed() {
                                     </div>
                                     <span className="text-xs text-gray-500">Today</span>
                                 </div>
-                                <h2 className="text-xl font-bold text-white mb-2 leading-tight">Thematic Insight</h2>
+                                <h2 className="text-xl font-bold text-white mb-2 leading-tight">
+                                    {notes.length === 0 ? 'Start capturing thoughts' : `${notes.length} note${notes.length !== 1 ? 's' : ''} captured`}
+                                </h2>
                                 <p className="text-gray-300 text-sm leading-relaxed mb-4">
-                                    You've written about <span className="text-white font-medium">building alone</span> 4 times this month. Consider reviewing these patterns to find new connections.
+                                    {notes.length === 0
+                                        ? 'Tap the + button below to write your first note.'
+                                        : 'Keep the momentum going. Tap + to add a new thought.'}
                                 </p>
-                                <button className="flex items-center gap-1 text-sm text-white font-medium hover:text-[#2b6cee] transition-colors group/btn">
-                                    Review patterns
+                                <Link href="/capture" className="flex items-center gap-1 text-sm text-white font-medium hover:text-[#2b6cee] transition-colors group/btn">
+                                    New note
                                     <span className="material-symbols-outlined text-[16px] group-hover/btn:translate-x-1 transition-transform">arrow_forward</span>
-                                </button>
+                                </Link>
                             </div>
                         </div>
                     </div>
@@ -113,12 +115,12 @@ export default function NoteFeed() {
                             <button
                                 key={tag}
                                 onClick={() => setActiveTag(tag)}
-                                className={`flex h-8 shrink-0 items-center justify-center gap-x-2 rounded-full px-4 transition-all active:scale-95 ${activeTag === tag
+                                className={`flex h-8 shrink-0 items-center justify-center gap-x-2 rounded-full px-4 transition-all active:scale-95 text-sm font-medium ${activeTag === tag
                                         ? 'bg-white text-black font-semibold'
                                         : 'bg-[#1e1e1e] border border-white/5 text-gray-300 hover:bg-white/5'
                                     }`}
                             >
-                                <p className="text-sm font-medium leading-normal">{tag}</p>
+                                {tag}
                             </button>
                         ))}
                     </div>
@@ -132,8 +134,9 @@ export default function NoteFeed() {
                         </div>
                     ) : filteredNotes.length === 0 ? (
                         <div className="text-center py-16 text-gray-500">
-                            <span className="material-symbols-outlined text-[48px] mb-3 block">note_stack</span>
-                            <p className="text-sm">No notes yet. Tap + to create one.</p>
+                            <span className="material-symbols-outlined text-[48px] mb-3 block opacity-30">note_stack</span>
+                            <p className="text-sm">No notes yet.</p>
+                            <Link href="/capture" className="text-[#2b6cee] text-sm mt-2 inline-block">Write your first note →</Link>
                         </div>
                     ) : (
                         <div className="grid grid-cols-2 gap-3">
@@ -143,14 +146,13 @@ export default function NoteFeed() {
                                     note={note}
                                     onPin={() => handlePin(note.id, note.is_pinned)}
                                     onArchive={() => handleArchive(note.id)}
+                                    onDelete={() => handleDelete(note.id)}
                                 />
                             ))}
                         </div>
                     )}
                 </div>
             </main>
-
-            {/* Bottom Navigation */}
             <BottomNav />
         </>
     );
@@ -158,33 +160,24 @@ export default function NoteFeed() {
 
 function BottomNav() {
     const pathname = usePathname();
-
     const navItems = [
         { href: '/', icon: 'home', label: 'Home' },
         { href: '/search', icon: 'search', label: 'Search' },
         { href: '/bookmarks', icon: 'bookmark', label: 'Saved' },
         { href: '/settings', icon: 'settings', label: 'Settings' },
     ];
-
     return (
         <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-white/5 bg-[#0a0a0a]/90 backdrop-blur-xl px-4 pb-6 pt-3">
             <div className="flex items-center justify-between max-w-md mx-auto">
                 {navItems.map(item => {
                     const isActive = pathname === item.href;
                     return (
-                        <Link
-                            key={item.href}
-                            href={item.href}
-                            className={`flex flex-1 flex-col items-center justify-end gap-1 transition-colors ${isActive ? 'text-white' : 'text-gray-500 hover:text-white'
-                                }`}
+                        <Link key={item.href} href={item.href}
+                            className={`flex flex-1 flex-col items-center justify-end gap-1 transition-colors ${isActive ? 'text-white' : 'text-gray-500 hover:text-white'}`}
                         >
                             <div className="flex h-7 items-center justify-center relative">
-                                <span className={`material-symbols-outlined text-[26px] ${isActive ? 'font-bold' : ''}`}>
-                                    {item.icon}
-                                </span>
-                                {isActive && (
-                                    <span className="absolute -bottom-2 w-1 h-1 bg-[#2b6cee] rounded-full" />
-                                )}
+                                <span className="material-symbols-outlined text-[26px]">{item.icon}</span>
+                                {isActive && <span className="absolute -bottom-2 w-1 h-1 bg-[#2b6cee] rounded-full" />}
                             </div>
                         </Link>
                     );
