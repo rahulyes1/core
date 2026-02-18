@@ -3,6 +3,7 @@
 import { useState, useRef } from 'react';
 import { motion, AnimatePresence, PanInfo, useAnimation } from 'framer-motion';
 import { useRouter } from 'next/navigation';
+import ShareCard from '../ShareCard';
 
 interface Note {
     id: string;
@@ -12,6 +13,9 @@ interface Note {
     created_at: string;
     is_pinned: boolean;
     image_url?: string;
+    mood?: string;
+    expires_at?: string;
+    locked_until?: string;
 }
 
 interface NoteCardProps {
@@ -54,6 +58,7 @@ export default function NoteCard({ note, onPin, onArchive, onDelete }: NoteCardP
     const router = useRouter();
     const controls = useAnimation();
     const [showActions, setShowActions] = useState(false);
+    const [showShare, setShowShare] = useState(false);
     const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const didLongPress = useRef(false);
 
@@ -111,10 +116,21 @@ export default function NoteCard({ note, onPin, onArchive, onDelete }: NoteCardP
 
                 <div className="relative z-10 flex flex-col h-full">
                     <div className="flex justify-between items-start mb-2">
-                        <span className="text-xs text-gray-500 shrink-0">{formatTime(note.created_at)}</span>
-                        {note.is_pinned && (
-                            <span className="material-symbols-outlined text-[14px] text-[#2b6cee]">push_pin</span>
-                        )}
+                        <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-xs text-gray-500 shrink-0">{formatTime(note.created_at)}</span>
+                            {note.mood && <span className="text-sm">{note.mood}</span>}
+                        </div>
+                        <div className="flex items-center gap-1">
+                            {note.locked_until && new Date(note.locked_until) > new Date() && (
+                                <span className="material-symbols-outlined text-[14px] text-purple-400">lock</span>
+                            )}
+                            {note.expires_at && new Date(note.expires_at) > new Date() && (
+                                <span className="material-symbols-outlined text-[14px] text-orange-400">local_fire_department</span>
+                            )}
+                            {note.is_pinned && (
+                                <span className="material-symbols-outlined text-[14px] text-[#2b6cee]">push_pin</span>
+                            )}
+                        </div>
                     </div>
                     <h3 className="text-base font-bold text-white leading-tight mb-2 line-clamp-2">{title}</h3>
                     <p className="text-sm text-gray-400 mb-auto line-clamp-3 leading-relaxed">{preview}</p>
@@ -167,6 +183,14 @@ export default function NoteCard({ note, onPin, onArchive, onDelete }: NoteCardP
                                 </button>
 
                                 <button
+                                    onClick={() => { setShowShare(true); setShowActions(false); }}
+                                    className="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl hover:bg-white/5 transition-colors text-left"
+                                >
+                                    <span className="material-symbols-outlined text-[22px] text-pink-400">ios_share</span>
+                                    <span className="text-white font-medium">Share as Image</span>
+                                </button>
+
+                                <button
                                     onClick={() => { onArchive(); setShowActions(false); }}
                                     className="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl hover:bg-white/5 transition-colors text-left"
                                 >
@@ -185,6 +209,10 @@ export default function NoteCard({ note, onPin, onArchive, onDelete }: NoteCardP
                         </motion.div>
                     </>
                 )}
+            </AnimatePresence>
+
+            <AnimatePresence>
+                {showShare && <ShareCard note={note} onClose={() => setShowShare(false)} />}
             </AnimatePresence>
         </>
     );

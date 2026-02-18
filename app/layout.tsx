@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from '../components/AuthProvider';
+import ShakeDetector from '../components/ShakeDetector';
 
 const inter = Inter({
   subsets: ["latin"],
@@ -30,6 +31,7 @@ export default function RootLayout({
       </head>
       <body className={`${inter.className} antialiased bg-[#0a0a0a] text-white`}>
         <AuthProvider>
+          <ShakeDetector />
           {children}
         </AuthProvider>
       </body>

@@ -5,7 +5,7 @@ import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, Suspense, useRef } from 'react';
 import { supabase } from '@/utils/supabase/client';
 import { useAI } from '@/hooks/useAI';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -25,6 +25,13 @@ export default function CapturePage() {
 
 type NoteType = 'note' | 'todo';
 
+const MOODS = ['😊', '🔥', '💡', '😤', '😔', '😴'];
+const EPHEMERAL_OPTIONS = [
+    { label: 'Off', value: null },
+    { label: '24h', value: 24 },
+    { label: '7d', value: 168 },
+];
+
 function CaptureContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
@@ -34,7 +41,13 @@ function CaptureContent() {
     const [title, setTitle] = useState('');
     const [noteType, setNoteType] = useState<NoteType>('note');
     const [saving, setSaving] = useState(false);
-    const [loaded, setLoaded] = useState(!editId); // if new note, already loaded
+    const [loaded, setLoaded] = useState(!editId);
+    const [mood, setMood] = useState<string | null>(null);
+    const [ephemeralHours, setEphemeralHours] = useState<number | null>(null);
+    const [showEphemeral, setShowEphemeral] = useState(false);
+    const [lockedUntil, setLockedUntil] = useState<string | null>(null);
+    const [isListening, setIsListening] = useState(false);
+    const recognitionRef = useRef<any>(null);
     const { result: aiResult, loading: aiLoading } = useAI(content);
 
     const editor = useEditor({
@@ -51,7 +64,7 @@ function CaptureContent() {
         content: '',
         editorProps: {
             attributes: {
-                class: 'prose prose-invert prose-base max-w-none focus:outline-none min-h-[60vh] px-4 py-2',
+                class: 'prose prose-invert prose-base max-w-none focus:outline-none min-h-[50vh] px-4 py-2',
             },
         },
         onUpdate: ({ editor }) => {
@@ -59,37 +72,52 @@ function CaptureContent() {
         },
     });
 
-    // Load existing note for editing
+    // Load existing note
     useEffect(() => {
         if (!editId || !editor) return;
-
         const loadNote = async () => {
-            const { data } = await supabase
-                .from('notes')
-                .select('*')
-                .eq('id', editId)
-                .single();
-
+            const { data } = await supabase.from('notes').select('*').eq('id', editId).single();
             if (data) {
                 setTitle(data.title || '');
+                setMood(data.mood || null);
                 editor.commands.setContent(data.content || '');
                 setContent(data.content || '');
-
-                // Detect if it has task list items
-                if (data.content?.includes('data-type="taskList"')) {
-                    setNoteType('todo');
-                }
-
-                // Move cursor to end
-                setTimeout(() => {
-                    editor.commands.focus('end');
-                }, 100);
+                if (data.content?.includes('data-type="taskList"')) setNoteType('todo');
+                setTimeout(() => editor.commands.focus('end'), 100);
             }
             setLoaded(true);
         };
-
         loadNote();
     }, [editId, editor]);
+
+    // Voice-to-Note
+    const toggleVoice = () => {
+        if (isListening) {
+            recognitionRef.current?.stop();
+            setIsListening(false);
+            return;
+        }
+        const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+        if (!SpeechRecognition) { alert('Speech not supported in this browser'); return; }
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = 'en-US';
+        recognition.onresult = (e: any) => {
+            let transcript = '';
+            for (let i = e.resultIndex; i < e.results.length; i++) {
+                transcript += e.results[i][0].transcript;
+            }
+            if (e.results[e.resultIndex].isFinal && editor) {
+                editor.chain().focus('end').insertContent(transcript + ' ').run();
+            }
+        };
+        recognition.onerror = () => setIsListening(false);
+        recognition.onend = () => setIsListening(false);
+        recognition.start();
+        recognitionRef.current = recognition;
+        setIsListening(true);
+    };
 
     const insertTodo = () => {
         if (!editor) return;
@@ -107,61 +135,47 @@ function CaptureContent() {
     };
 
     const handleOk = async () => {
-        if (!content || content === '<p></p>') {
-            router.push('/');
-            return;
-        }
+        if (!content || content === '<p></p>') { router.push('/'); return; }
         setSaving(true);
-
         try {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) { router.push('/login'); return; }
-
             await ensureUserProfile(user);
 
             const payload: any = {
                 content,
                 user_id: user.id,
                 updated_at: new Date().toISOString(),
+                mood: mood || null,
             };
 
-            if (editId) {
-                // Update existing note
-                try {
-                    await supabase.from('notes').update({
-                        ...payload,
-                        title: title || null,
-                    }).eq('id', editId);
-                } catch {
-                    await supabase.from('notes').update(payload).eq('id', editId);
-                }
-            } else {
-                // Insert new note
-                try {
-                    const { error } = await supabase.from('notes').insert({
-                        ...payload,
-                        title: title || null,
-                    });
-                    if (error && error.message?.includes('title')) {
-                        await supabase.from('notes').insert(payload);
-                    } else if (error) {
-                        throw error;
-                    }
-                } catch (e) {
-                    throw e;
-                }
+            // Add ephemeral expiry
+            if (ephemeralHours) {
+                payload.expires_at = new Date(Date.now() + ephemeralHours * 60 * 60 * 1000).toISOString();
             }
 
-            // Handle AI tags for new notes
-            if (!editId && aiResult?.tags?.length) {
-                const { data: latestNote } = await supabase
-                    .from('notes')
-                    .select('id')
-                    .eq('user_id', user.id)
-                    .order('created_at', { ascending: false })
-                    .limit(1)
-                    .single();
+            // Add time capsule lock
+            if (lockedUntil) {
+                payload.locked_until = lockedUntil;
+            }
 
+            if (editId) {
+                await supabase.from('notes').update({ ...payload, title: title || null }).eq('id', editId);
+            } else {
+                const { error } = await supabase.from('notes').insert({ ...payload, title: title || null });
+                if (error && error.message?.includes('mood')) {
+                    // columns missing, save minimal
+                    const { error: e2 } = await supabase.from('notes').insert({
+                        content, user_id: user.id, updated_at: new Date().toISOString(),
+                    });
+                    if (e2) throw e2;
+                } else if (error) throw error;
+            }
+
+            // AI tags
+            if (!editId && aiResult?.tags?.length) {
+                const { data: latestNote } = await supabase.from('notes').select('id')
+                    .eq('user_id', user.id).order('created_at', { ascending: false }).limit(1).single();
                 if (latestNote) {
                     for (const tagName of aiResult.tags) {
                         try {
@@ -171,17 +185,12 @@ function CaptureContent() {
                                 const { data: newTag } = await supabase.from('tags').insert({ name: tagName }).select().single();
                                 tagId = newTag?.id;
                             }
-                            if (tagId) {
-                                await supabase.from('note_tags').upsert({ note_id: latestNote.id, tag_id: tagId });
-                            }
+                            if (tagId) await supabase.from('note_tags').upsert({ note_id: latestNote.id, tag_id: tagId });
                         } catch { }
                     }
                 }
             }
-
-            // Instant redirect home
             router.push('/');
-
         } catch (e: any) {
             console.error('Save failed:', e);
             setSaving(false);
@@ -189,80 +198,106 @@ function CaptureContent() {
         }
     };
 
-    const handleBack = () => {
-        router.push('/');
-    };
-
     const wordCount = content.replace(/<[^>]*>/g, '').trim().split(/\s+/).filter(Boolean).length;
     const hasContent = content && content !== '<p></p>';
 
-    // Loading state for edit mode
-    if (!loaded) {
-        return (
-            <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center">
-                <span className="material-symbols-outlined text-[32px] text-gray-600 animate-spin">progress_activity</span>
-            </div>
-        );
-    }
+    if (!loaded) return (
+        <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center">
+            <span className="material-symbols-outlined text-[32px] text-gray-600 animate-spin">progress_activity</span>
+        </div>
+    );
 
     return (
         <div className="min-h-screen bg-[#0a0a0a] flex flex-col text-white">
-
             {/* Top Bar */}
             <div className="flex items-center justify-between px-4 py-3 sticky top-0 bg-[#0a0a0a]/95 backdrop-blur-md z-50 border-b border-white/5">
-                <button onClick={handleBack} className="p-1.5 -ml-1.5 rounded-full hover:bg-white/5 transition-colors">
+                <button onClick={() => router.push('/')} className="p-1.5 -ml-1.5 rounded-full hover:bg-white/5 transition-colors">
                     <span className="material-symbols-outlined text-[24px] text-gray-400">close</span>
                 </button>
-
                 <div className="flex items-center gap-2">
                     {aiLoading && (
                         <span className="text-xs text-[#2b6cee] flex items-center gap-1">
-                            <span className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>
-                            AI
+                            <span className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>AI
                         </span>
                     )}
-                    {editId && (
-                        <span className="text-xs text-gray-600">Editing</span>
+                    {editId && <span className="text-xs text-gray-600">Editing</span>}
+                    {isListening && (
+                        <span className="text-xs text-red-400 flex items-center gap-1 animate-pulse">
+                            <span className="w-2 h-2 bg-red-400 rounded-full" />Listening...
+                        </span>
                     )}
                 </div>
             </div>
 
-            {/* Note Type Switcher */}
-            <div className="flex gap-2 px-4 pt-4">
-                <button
-                    onClick={() => setNoteType('note')}
-                    className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full transition-all ${noteType === 'note'
-                        ? 'bg-white text-black'
-                        : 'bg-[#1e1e1e] text-gray-400 border border-white/5'
-                        }`}
+            {/* Type Switcher + Ephemeral + Time Capsule */}
+            <div className="flex gap-2 px-4 pt-4 flex-wrap">
+                <button onClick={() => setNoteType('note')}
+                    className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full transition-all ${noteType === 'note' ? 'bg-white text-black' : 'bg-[#1e1e1e] text-gray-400 border border-white/5'}`}
                 >
-                    <span className="material-symbols-outlined text-[14px]">edit_note</span>
-                    Note
+                    <span className="material-symbols-outlined text-[14px]">edit_note</span>Note
                 </button>
-                <button
-                    onClick={() => { setNoteType('todo'); insertTodo(); }}
-                    className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full transition-all ${noteType === 'todo'
-                        ? 'bg-white text-black'
-                        : 'bg-[#1e1e1e] text-gray-400 border border-white/5'
-                        }`}
+                <button onClick={() => { setNoteType('todo'); insertTodo(); }}
+                    className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full transition-all ${noteType === 'todo' ? 'bg-white text-black' : 'bg-[#1e1e1e] text-gray-400 border border-white/5'}`}
                 >
-                    <span className="material-symbols-outlined text-[14px]">checklist</span>
-                    To-Do
+                    <span className="material-symbols-outlined text-[14px]">checklist</span>To-Do
                 </button>
+                <button onClick={() => setShowEphemeral(!showEphemeral)}
+                    className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full transition-all ${ephemeralHours ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' : 'bg-[#1e1e1e] text-gray-400 border border-white/5'}`}
+                >
+                    <span className="material-symbols-outlined text-[14px]">local_fire_department</span>
+                    {ephemeralHours ? (ephemeralHours === 24 ? '24h' : '7d') : 'Ephemeral'}
+                </button>
+                <div className="relative">
+                    <button onClick={() => {
+                        const el = document.getElementById('capsule-date');
+                        if (el) (el as HTMLInputElement).showPicker();
+                    }}
+                        className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full transition-all ${lockedUntil ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' : 'bg-[#1e1e1e] text-gray-400 border border-white/5'}`}
+                    >
+                        <span className="material-symbols-outlined text-[14px]">lock_clock</span>
+                        {lockedUntil ? `Until ${new Date(lockedUntil).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : 'Time Capsule'}
+                    </button>
+                    <input id="capsule-date" type="date" className="absolute inset-0 opacity-0 w-full cursor-pointer"
+                        min={new Date(Date.now() + 86400000).toISOString().split('T')[0]}
+                        onChange={e => setLockedUntil(e.target.value ? new Date(e.target.value).toISOString() : null)}
+                    />
+                </div>
             </div>
 
-            {/* Title Input */}
-            <input
-                type="text"
-                value={title}
-                onChange={e => setTitle(e.target.value)}
+            {/* Ephemeral Options */}
+            <AnimatePresence>
+                {showEphemeral && (
+                    <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+                        <div className="flex gap-2 px-4 pt-2">
+                            {EPHEMERAL_OPTIONS.map(opt => (
+                                <button key={opt.label} onClick={() => { setEphemeralHours(opt.value); setShowEphemeral(false); }}
+                                    className={`text-xs px-3 py-1.5 rounded-full transition-all ${ephemeralHours === opt.value ? 'bg-orange-500 text-white' : 'bg-[#1e1e1e] text-gray-400 border border-white/5'}`}
+                                >{opt.label}</button>
+                            ))}
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Title */}
+            <input type="text" value={title} onChange={e => setTitle(e.target.value)}
                 placeholder={noteType === 'todo' ? 'Task list name...' : 'Title (optional)'}
                 className="w-full bg-transparent text-white text-2xl font-bold px-4 pt-4 pb-2 focus:outline-none placeholder:text-gray-700"
             />
 
             {/* Editor */}
-            <div className="flex-1">
-                <EditorContent editor={editor} />
+            <div className="flex-1"><EditorContent editor={editor} /></div>
+
+            {/* Mood Picker */}
+            <div className="px-4 py-2 border-t border-white/5">
+                <p className="text-[10px] text-gray-600 mb-1.5">How are you feeling?</p>
+                <div className="flex gap-2">
+                    {MOODS.map(m => (
+                        <button key={m} onClick={() => setMood(mood === m ? null : m)}
+                            className={`w-9 h-9 rounded-full flex items-center justify-center text-lg transition-all ${mood === m ? 'bg-white/10 scale-110 ring-2 ring-[#2b6cee]' : 'hover:bg-white/5 active:scale-95'}`}
+                        >{m}</button>
+                    ))}
+                </div>
             </div>
 
             {/* Formatting toolbar */}
@@ -278,15 +313,14 @@ function CaptureContent() {
                         { action: () => editor.chain().focus().toggleHeading({ level: 2 }).run(), icon: 'title', check: 'heading' },
                         { action: () => editor.chain().focus().toggleBlockquote().run(), icon: 'format_quote', check: 'blockquote' },
                     ].map(btn => (
-                        <button
-                            key={btn.icon}
-                            onClick={btn.action}
-                            className={`p-2 rounded-lg transition-colors ${editor.isActive(btn.check) ? 'bg-white/15 text-white' : 'text-gray-500 hover:text-white hover:bg-white/5'
-                                }`}
-                        >
-                            <span className="material-symbols-outlined text-[18px]">{btn.icon}</span>
-                        </button>
+                        <button key={btn.icon} onClick={btn.action}
+                            className={`p-2 rounded-lg transition-colors ${editor.isActive(btn.check) ? 'bg-white/15 text-white' : 'text-gray-500 hover:text-white hover:bg-white/5'}`}
+                        ><span className="material-symbols-outlined text-[18px]">{btn.icon}</span></button>
                     ))}
+                    {/* Mic button */}
+                    <button onClick={toggleVoice}
+                        className={`p-2 rounded-lg transition-colors ${isListening ? 'bg-red-500/20 text-red-400' : 'text-gray-500 hover:text-white hover:bg-white/5'}`}
+                    ><span className="material-symbols-outlined text-[18px]">mic</span></button>
                 </div>
             )}
 
@@ -302,23 +336,15 @@ function CaptureContent() {
                 )}
             </div>
 
-            {/* Floating OK Button — bottom right */}
+            {/* Floating OK Button */}
             <AnimatePresence>
                 {hasContent && (
-                    <motion.button
-                        initial={{ scale: 0, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
-                        exit={{ scale: 0, opacity: 0 }}
-                        whileTap={{ scale: 0.9 }}
-                        onClick={handleOk}
-                        disabled={saving}
-                        className="fixed bottom-20 right-5 z-50 w-14 h-14 rounded-full bg-[#2b6cee] text-white shadow-lg shadow-[#2b6cee]/30 flex items-center justify-center active:bg-[#2b6cee]/80 transition-colors disabled:opacity-50"
+                    <motion.button initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }} whileTap={{ scale: 0.9 }}
+                        onClick={handleOk} disabled={saving}
+                        className="fixed bottom-20 right-5 z-50 w-14 h-14 rounded-full bg-[#2b6cee] text-white shadow-lg shadow-[#2b6cee]/30 flex items-center justify-center disabled:opacity-50"
                     >
-                        {saving ? (
-                            <span className="material-symbols-outlined text-[24px] animate-spin">progress_activity</span>
-                        ) : (
-                            <span className="material-symbols-outlined text-[28px]">check</span>
-                        )}
+                        {saving ? <span className="material-symbols-outlined text-[24px] animate-spin">progress_activity</span>
+                            : <span className="material-symbols-outlined text-[28px]">check</span>}
                     </motion.button>
                 )}
             </AnimatePresence>
