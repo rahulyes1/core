@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 import TopBar from '../components/home/TopBar';
 import NoteFeed from '../components/home/NoteFeed';
 import FAB from '../components/home/FAB';
