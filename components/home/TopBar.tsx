@@ -1,8 +1,14 @@
 'use client';
 
-import Link from 'next/link';
+import { useAuth } from '@/components/AuthProvider';
 
 export default function TopBar() {
+    const { user } = useAuth();
+
+    const avatarUrl = user?.user_metadata?.avatar_url;
+    const name = user?.user_metadata?.full_name || user?.email || '';
+    const initials = name.charAt(0).toUpperCase();
+
     return (
         <header className="fixed top-0 left-0 right-0 z-50 h-14 flex items-center justify-between px-4 glass-header">
             <div className="flex items-center gap-3">
@@ -16,7 +22,16 @@ export default function TopBar() {
                     <span className="material-symbols-outlined text-[24px]">search</span>
                 </button>
                 <div className="w-8 h-8 rounded-full bg-gray-800 overflow-hidden border border-gray-700 flex items-center justify-center">
-                    <span className="material-symbols-outlined text-[20px] text-gray-400">person</span>
+                    {avatarUrl ? (
+                        <img
+                            src={avatarUrl}
+                            alt={name}
+                            className="w-full h-full object-cover"
+                            referrerPolicy="no-referrer"
+                        />
+                    ) : (
+                        <span className="text-sm font-semibold text-gray-300">{initials || '?'}</span>
+                    )}
                 </div>
             </div>
         </header>
