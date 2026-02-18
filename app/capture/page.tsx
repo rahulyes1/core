@@ -5,15 +5,27 @@ import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { supabase } from '@/utils/supabase/client';
 import { useAI } from '@/hooks/useAI';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 
+export default function CapturePage() {
+    return (
+        <Suspense fallback={
+            <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center">
+                <span className="material-symbols-outlined text-[32px] text-gray-600 animate-spin">progress_activity</span>
+            </div>
+        }>
+            <CaptureContent />
+        </Suspense>
+    );
+}
+
 type NoteType = 'note' | 'todo';
 
-export default function CapturePage() {
+function CaptureContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const editId = searchParams.get('id');
@@ -220,8 +232,8 @@ export default function CapturePage() {
                 <button
                     onClick={() => setNoteType('note')}
                     className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full transition-all ${noteType === 'note'
-                            ? 'bg-white text-black'
-                            : 'bg-[#1e1e1e] text-gray-400 border border-white/5'
+                        ? 'bg-white text-black'
+                        : 'bg-[#1e1e1e] text-gray-400 border border-white/5'
                         }`}
                 >
                     <span className="material-symbols-outlined text-[14px]">edit_note</span>
@@ -230,8 +242,8 @@ export default function CapturePage() {
                 <button
                     onClick={() => { setNoteType('todo'); insertTodo(); }}
                     className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full transition-all ${noteType === 'todo'
-                            ? 'bg-white text-black'
-                            : 'bg-[#1e1e1e] text-gray-400 border border-white/5'
+                        ? 'bg-white text-black'
+                        : 'bg-[#1e1e1e] text-gray-400 border border-white/5'
                         }`}
                 >
                     <span className="material-symbols-outlined text-[14px]">checklist</span>
