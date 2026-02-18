@@ -10,7 +10,12 @@ function getGreeting(): string {
     return 'Good evening';
 }
 
-export default function TopBar() {
+interface TopBarProps {
+    showTidyUp?: boolean;
+    onTidyUp?: () => void;
+}
+
+export default function TopBar({ showTidyUp, onTidyUp }: TopBarProps) {
     const { user } = useAuth();
 
     const avatarUrl = user?.user_metadata?.avatar_url;
@@ -21,6 +26,15 @@ export default function TopBar() {
             <div className="w-8 h-8 shrink-0 rounded-xl bg-gradient-to-br from-[#2b6cee] to-purple-600 flex items-center justify-center text-white font-bold text-xs shadow-lg shadow-[#2b6cee]/20">
                 C
             </div>
+
+            {showTidyUp && (
+                <button
+                    onClick={onTidyUp}
+                    className="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-gray-400 hover:text-[#2b6cee] hover:bg-[#2b6cee]/10 transition-colors"
+                >
+                    <span className="material-symbols-outlined text-[18px]">cleaning_services</span>
+                </button>
+            )}
 
             <Link href="/search" className="flex-1 h-10 rounded-full bg-white/5 border border-white/5 flex items-center px-4 gap-2 hover:bg-white/10 transition-colors group">
                 <span className="material-symbols-outlined text-[20px] text-gray-400 group-hover:text-white transition-colors">search</span>

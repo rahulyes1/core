@@ -145,21 +145,22 @@ export default function NoteCard({ note, onPin, onArchive, onDelete }: NoteCardP
                     </div>
                 </div>
 
-                {/* Hover Actions */}
-                <div className="absolute bottom-3 right-3 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity z-20">
+
+                {/* Actions (Always Visible) */}
+                <div className="absolute top-3 right-3 flex gap-2 z-20">
                     <button
                         onClick={(e) => { e.stopPropagation(); onPin(); }}
-                        className={`w-8 h-8 rounded-full flex items-center justify-center backdrop-blur-md shadow-lg transition-colors ${note.is_pinned ? 'bg-[#2b6cee] text-white' : 'bg-white/10 text-white hover:bg-white/20'}`}
+                        className={`w-8 h-8 rounded-full flex items-center justify-center backdrop-blur-md shadow-lg transition-colors ${note.is_pinned ? 'bg-[#2b6cee] text-white' : 'bg-black/40 text-white/70 hover:bg-black/60 hover:text-white'}`}
                         title={note.is_pinned ? "Unpin" : "Pin"}
                     >
-                        <span className="material-symbols-outlined text-[18px]">push_pin</span>
+                        <span className="material-symbols-outlined text-[16px]">push_pin</span>
                     </button>
                     <button
                         onClick={(e) => { e.stopPropagation(); onDelete(); }}
-                        className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-white hover:bg-red-500/20 hover:text-red-400 backdrop-blur-md shadow-lg transition-colors"
+                        className="w-8 h-8 rounded-full bg-black/40 flex items-center justify-center text-white/70 hover:bg-red-500/20 hover:text-red-400 backdrop-blur-md shadow-lg transition-colors"
                         title="Delete"
                     >
-                        <span className="material-symbols-outlined text-[18px]">delete</span>
+                        <span className="material-symbols-outlined text-[16px]">delete</span>
                     </button>
                 </div>
             </motion.article>

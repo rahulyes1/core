@@ -1,11 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import NoteCard from './NoteCard';
 import SmartMergeCard from '../SmartMergeCard';
+import TopBar from './TopBar';
 import { supabase } from '@/utils/supabase/client';
+import { AnimatePresence, motion } from 'framer-motion';
 
 interface Note {
     id: string;
@@ -28,6 +30,9 @@ export default function NoteFeed() {
     const [activeTag, setActiveTag] = useState('All');
     const [onThisDayNotes, setOnThisDayNotes] = useState<Note[]>([]);
     const [streak, setStreak] = useState(0);
+    const [showMerge, setShowMerge] = useState(false);
+    const [deletedNote, setDeletedNote] = useState<Note | null>(null);
+    const undoTimerRef = useRef<NodeJS.Timeout | null>(null);
 
     useEffect(() => {
         fetchNotes();
@@ -118,8 +123,30 @@ export default function NoteFeed() {
     };
 
     const handleDelete = async (id: string) => {
+        const noteToDelete = notes.find(n => n.id === id);
+        if (!noteToDelete) return;
+
+        setDeletedNote(noteToDelete);
         setNotes(prev => prev.filter(n => n.id !== id));
-        await supabase.from('notes').delete().eq('id', id);
+
+        // Show undo toast for 4 seconds
+        if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+        undoTimerRef.current = setTimeout(async () => {
+            await supabase.from('notes').delete().eq('id', id);
+            setDeletedNote(null);
+        }, 4000);
+    };
+
+    const handleUndo = async () => {
+        if (!deletedNote) return;
+        if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+
+        setNotes(prev => [deletedNote, ...prev].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
+        setDeletedNote(null);
+    };
+
+    const handleTidyUp = () => {
+        setShowMerge(true);
     };
 
     const filteredNotes = activeTag === 'All'
@@ -130,36 +157,40 @@ export default function NoteFeed() {
 
     return (
         <>
-            <main className="flex-1 overflow-y-auto pb-24 pt-16">
-                <div className="px-4 pb-6 space-y-5">
+            <main className="flex-1 overflow-y-auto pb-24">
+                <TopBar showTidyUp={notes.length >= 3} onTidyUp={handleTidyUp} />
+                <div className="px-4 pb-6 space-y-5 pt-20">
 
                     {/* Daily Digest + Streak */}
-                    <div className="relative rounded-xl p-[1px] bg-gradient-to-br from-[#2b6cee]/40 to-transparent">
-                        <div className="bg-[#121212]/95 backdrop-blur-sm rounded-xl p-4 relative overflow-hidden flex items-center justify-between">
-                            <div className="absolute -top-10 -right-10 w-24 h-24 bg-[#2b6cee]/20 rounded-full blur-2xl" />
-
-                            <div className="relative z-10 flex flex-col gap-1">
-                                <div className="flex items-center gap-2">
-                                    <span className="material-symbols-outlined text-[#2b6cee] text-[18px]">auto_awesome</span>
-                                    <h2 className="text-base font-bold text-white">Daily Digest</h2>
-                                </div>
-                                <p className="text-xs text-gray-400">
-                                    {notes.length === 0 ? 'Start capturing' : `${notes.length} note${notes.length !== 1 ? 's' : ''} captured today`}
-                                </p>
-                            </div>
-
-                            <div className="relative z-10 flex items-center gap-3">
-                                {streak > 0 && (
-                                    <div className="flex flex-col items-end">
-                                        <div className="flex items-center gap-1">
-                                            <span className="text-sm">🔥</span>
-                                            <span className="text-sm font-bold text-orange-400">{streak}</span>
-                                        </div>
-                                        <span className="text-[10px] text-gray-500 uppercase tracking-wide">Streak</span>
+                    <div className="relative rounded-xl p-[1px] bg-gradient-to-br from-[#2b6cee]/60 via-purple-500/30 to-transparent">
+                        <div className="bg-[#121212]/95 backdrop-blur-sm rounded-xl p-5 relative overflow-hidden group">
+                            <div className="absolute -top-10 -right-10 w-32 h-32 bg-[#2b6cee]/20 rounded-full blur-3xl group-hover:bg-[#2b6cee]/30 transition-all duration-700" />
+                            <div className="relative z-10">
+                                <div className="flex items-center justify-between mb-3">
+                                    <div className="flex items-center gap-2">
+                                        <span className="material-symbols-outlined text-[#2b6cee] text-[20px]">auto_awesome</span>
+                                        <p className="text-xs font-semibold text-[#2b6cee] uppercase tracking-wider">Daily Digest</p>
                                     </div>
-                                )}
-                                <Link href="/capture" className="w-10 h-10 rounded-full bg-[#2b6cee] flex items-center justify-center text-white shadow-lg shadow-[#2b6cee]/20 hover:scale-105 transition-transform">
-                                    <span className="material-symbols-outlined text-[24px]">add</span>
+                                    {streak > 0 && (
+                                        <div className="flex items-center gap-1 bg-orange-500/15 px-2.5 py-1 rounded-full">
+                                            <span className="text-sm">🔥</span>
+                                            <span className="text-xs font-bold text-orange-400">{streak} day{streak !== 1 && 's'}</span>
+                                        </div>
+                                    )}
+                                </div>
+                                <h2 className="text-xl font-bold text-white mb-2 leading-tight">
+                                    {notes.length === 0 ? 'Start capturing thoughts' : `${notes.length} note${notes.length !== 1 ? 's' : ''} captured`}
+                                </h2>
+                                <p className="text-gray-300 text-sm leading-relaxed mb-4">
+                                    {notes.length === 0
+                                        ? 'Tap the + button below to write your first note.'
+                                        : streak > 1
+                                            ? `You're on a ${streak}-day streak! Keep it going 🔥`
+                                            : 'Keep the momentum going. Tap + to add a new thought.'}
+                                </p>
+                                <Link href="/capture" className="flex items-center gap-1 text-sm text-white font-medium hover:text-[#2b6cee] transition-colors group/btn">
+                                    New note
+                                    <span className="material-symbols-outlined text-[16px] group-hover/btn:translate-x-1 transition-transform">arrow_forward</span>
                                 </Link>
                             </div>
                         </div>
@@ -188,8 +219,10 @@ export default function NoteFeed() {
                     )}
 
                     {/* Smart Merge */}
-                    {notes.length >= 3 && (
-                        <SmartMergeCard key="smart-merge" notes={notes} onMerge={fetchNotes} />
+                    {(showMerge || notes.length >= 3) && (
+                        <div className={!showMerge ? 'hidden' : ''}>
+                            <SmartMergeCard key="smart-merge" notes={notes} onMerge={() => { fetchNotes(); setShowMerge(false); }} />
+                        </div>
                     )}
 
                     {/* Filter Chips */}
@@ -232,6 +265,24 @@ export default function NoteFeed() {
                     )}
                 </div>
             </main>
+
+            {/* Undo Toast */}
+            <AnimatePresence>
+                {deletedNote && (
+                    <motion.div
+                        initial={{ opacity: 0, y: 50 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: 50 }}
+                        className="fixed bottom-24 left-4 right-4 z-50 flex items-center justify-between bg-[#1e1e1e] border border-white/10 rounded-xl p-4 shadow-xl"
+                    >
+                        <span className="text-sm text-white">Note deleted</span>
+                        <button onClick={handleUndo} className="text-sm font-bold text-[#2b6cee] hover:text-[#2b6cee]/80">
+                            Undo
+                        </button>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
             <BottomNav />
         </>
     );
