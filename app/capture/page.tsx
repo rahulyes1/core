@@ -5,20 +5,24 @@ import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
-import { useState, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '@/utils/supabase/client';
 import { useAI } from '@/hooks/useAI';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 
 type NoteType = 'note' | 'todo';
 
 export default function CapturePage() {
     const router = useRouter();
+    const searchParams = useSearchParams();
+    const editId = searchParams.get('id');
+
     const [content, setContent] = useState('');
     const [title, setTitle] = useState('');
     const [noteType, setNoteType] = useState<NoteType>('note');
     const [saving, setSaving] = useState(false);
+    const [loaded, setLoaded] = useState(!editId); // if new note, already loaded
     const { result: aiResult, loading: aiLoading } = useAI(content);
 
     const editor = useEditor({
@@ -43,6 +47,38 @@ export default function CapturePage() {
         },
     });
 
+    // Load existing note for editing
+    useEffect(() => {
+        if (!editId || !editor) return;
+
+        const loadNote = async () => {
+            const { data } = await supabase
+                .from('notes')
+                .select('*')
+                .eq('id', editId)
+                .single();
+
+            if (data) {
+                setTitle(data.title || '');
+                editor.commands.setContent(data.content || '');
+                setContent(data.content || '');
+
+                // Detect if it has task list items
+                if (data.content?.includes('data-type="taskList"')) {
+                    setNoteType('todo');
+                }
+
+                // Move cursor to end
+                setTimeout(() => {
+                    editor.commands.focus('end');
+                }, 100);
+            }
+            setLoaded(true);
+        };
+
+        loadNote();
+    }, [editId, editor]);
+
     const insertTodo = () => {
         if (!editor) return;
         editor.chain().focus().toggleTaskList().run();
@@ -50,7 +86,6 @@ export default function CapturePage() {
     };
 
     const ensureUserProfile = async (user: any) => {
-        // Make sure user exists in public.users (for foreign key)
         await supabase.from('users').upsert({
             id: user.id,
             email: user.email,
@@ -59,15 +94,17 @@ export default function CapturePage() {
         }, { onConflict: 'id' });
     };
 
-    const handleSave = async () => {
-        if (!content || content === '<p></p>') return;
+    const handleOk = async () => {
+        if (!content || content === '<p></p>') {
+            router.push('/');
+            return;
+        }
         setSaving(true);
 
         try {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) { router.push('/login'); return; }
 
-            // Ensure profile exists
             await ensureUserProfile(user);
 
             const payload: any = {
@@ -76,24 +113,35 @@ export default function CapturePage() {
                 updated_at: new Date().toISOString(),
             };
 
-            // Try with title
-            try {
-                const { error } = await supabase.from('notes').insert({
-                    ...payload,
-                    title: title || null,
-                });
-                if (error && error.message?.includes('title')) {
-                    // title column missing, save without
-                    await supabase.from('notes').insert(payload);
-                } else if (error) {
-                    throw error;
+            if (editId) {
+                // Update existing note
+                try {
+                    await supabase.from('notes').update({
+                        ...payload,
+                        title: title || null,
+                    }).eq('id', editId);
+                } catch {
+                    await supabase.from('notes').update(payload).eq('id', editId);
                 }
-            } catch (e) {
-                throw e;
+            } else {
+                // Insert new note
+                try {
+                    const { error } = await supabase.from('notes').insert({
+                        ...payload,
+                        title: title || null,
+                    });
+                    if (error && error.message?.includes('title')) {
+                        await supabase.from('notes').insert(payload);
+                    } else if (error) {
+                        throw error;
+                    }
+                } catch (e) {
+                    throw e;
+                }
             }
 
-            // Handle AI tags
-            if (aiResult?.tags?.length) {
+            // Handle AI tags for new notes
+            if (!editId && aiResult?.tags?.length) {
                 const { data: latestNote } = await supabase
                     .from('notes')
                     .select('id')
@@ -125,7 +173,7 @@ export default function CapturePage() {
         } catch (e: any) {
             console.error('Save failed:', e);
             setSaving(false);
-            alert('Save failed: ' + (e?.message || 'Unknown error'));
+            alert('Failed: ' + (e?.message || 'Unknown error'));
         }
     };
 
@@ -135,6 +183,15 @@ export default function CapturePage() {
 
     const wordCount = content.replace(/<[^>]*>/g, '').trim().split(/\s+/).filter(Boolean).length;
     const hasContent = content && content !== '<p></p>';
+
+    // Loading state for edit mode
+    if (!loaded) {
+        return (
+            <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center">
+                <span className="material-symbols-outlined text-[32px] text-gray-600 animate-spin">progress_activity</span>
+            </div>
+        );
+    }
 
     return (
         <div className="min-h-screen bg-[#0a0a0a] flex flex-col text-white">
@@ -151,6 +208,9 @@ export default function CapturePage() {
                             <span className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>
                             AI
                         </span>
+                    )}
+                    {editId && (
+                        <span className="text-xs text-gray-600">Editing</span>
                     )}
                 </div>
             </div>
@@ -196,54 +256,25 @@ export default function CapturePage() {
             {/* Formatting toolbar */}
             {editor && (
                 <div className="sticky bottom-16 z-30 px-4 pb-2 flex gap-1 overflow-x-auto no-scrollbar">
-                    <button
-                        onClick={() => editor.chain().focus().toggleBold().run()}
-                        className={`p-2 rounded-lg transition-colors ${editor.isActive('bold') ? 'bg-white/15 text-white' : 'text-gray-500 hover:text-white hover:bg-white/5'}`}
-                    >
-                        <span className="material-symbols-outlined text-[18px]">format_bold</span>
-                    </button>
-                    <button
-                        onClick={() => editor.chain().focus().toggleItalic().run()}
-                        className={`p-2 rounded-lg transition-colors ${editor.isActive('italic') ? 'bg-white/15 text-white' : 'text-gray-500 hover:text-white hover:bg-white/5'}`}
-                    >
-                        <span className="material-symbols-outlined text-[18px]">format_italic</span>
-                    </button>
-                    <button
-                        onClick={() => editor.chain().focus().toggleStrike().run()}
-                        className={`p-2 rounded-lg transition-colors ${editor.isActive('strike') ? 'bg-white/15 text-white' : 'text-gray-500 hover:text-white hover:bg-white/5'}`}
-                    >
-                        <span className="material-symbols-outlined text-[18px]">strikethrough_s</span>
-                    </button>
-                    <button
-                        onClick={() => editor.chain().focus().toggleBulletList().run()}
-                        className={`p-2 rounded-lg transition-colors ${editor.isActive('bulletList') ? 'bg-white/15 text-white' : 'text-gray-500 hover:text-white hover:bg-white/5'}`}
-                    >
-                        <span className="material-symbols-outlined text-[18px]">format_list_bulleted</span>
-                    </button>
-                    <button
-                        onClick={() => editor.chain().focus().toggleOrderedList().run()}
-                        className={`p-2 rounded-lg transition-colors ${editor.isActive('orderedList') ? 'bg-white/15 text-white' : 'text-gray-500 hover:text-white hover:bg-white/5'}`}
-                    >
-                        <span className="material-symbols-outlined text-[18px]">format_list_numbered</span>
-                    </button>
-                    <button
-                        onClick={() => editor.chain().focus().toggleTaskList().run()}
-                        className={`p-2 rounded-lg transition-colors ${editor.isActive('taskList') ? 'bg-white/15 text-white' : 'text-gray-500 hover:text-white hover:bg-white/5'}`}
-                    >
-                        <span className="material-symbols-outlined text-[18px]">check_box</span>
-                    </button>
-                    <button
-                        onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
-                        className={`p-2 rounded-lg transition-colors ${editor.isActive('heading') ? 'bg-white/15 text-white' : 'text-gray-500 hover:text-white hover:bg-white/5'}`}
-                    >
-                        <span className="material-symbols-outlined text-[18px]">title</span>
-                    </button>
-                    <button
-                        onClick={() => editor.chain().focus().toggleBlockquote().run()}
-                        className={`p-2 rounded-lg transition-colors ${editor.isActive('blockquote') ? 'bg-white/15 text-white' : 'text-gray-500 hover:text-white hover:bg-white/5'}`}
-                    >
-                        <span className="material-symbols-outlined text-[18px]">format_quote</span>
-                    </button>
+                    {[
+                        { action: () => editor.chain().focus().toggleBold().run(), icon: 'format_bold', check: 'bold' },
+                        { action: () => editor.chain().focus().toggleItalic().run(), icon: 'format_italic', check: 'italic' },
+                        { action: () => editor.chain().focus().toggleStrike().run(), icon: 'strikethrough_s', check: 'strike' },
+                        { action: () => editor.chain().focus().toggleBulletList().run(), icon: 'format_list_bulleted', check: 'bulletList' },
+                        { action: () => editor.chain().focus().toggleOrderedList().run(), icon: 'format_list_numbered', check: 'orderedList' },
+                        { action: () => editor.chain().focus().toggleTaskList().run(), icon: 'check_box', check: 'taskList' },
+                        { action: () => editor.chain().focus().toggleHeading({ level: 2 }).run(), icon: 'title', check: 'heading' },
+                        { action: () => editor.chain().focus().toggleBlockquote().run(), icon: 'format_quote', check: 'blockquote' },
+                    ].map(btn => (
+                        <button
+                            key={btn.icon}
+                            onClick={btn.action}
+                            className={`p-2 rounded-lg transition-colors ${editor.isActive(btn.check) ? 'bg-white/15 text-white' : 'text-gray-500 hover:text-white hover:bg-white/5'
+                                }`}
+                        >
+                            <span className="material-symbols-outlined text-[18px]">{btn.icon}</span>
+                        </button>
+                    ))}
                 </div>
             )}
 
@@ -259,7 +290,7 @@ export default function CapturePage() {
                 )}
             </div>
 
-            {/* Floating Save Button — bottom right */}
+            {/* Floating OK Button — bottom right */}
             <AnimatePresence>
                 {hasContent && (
                     <motion.button
@@ -267,20 +298,14 @@ export default function CapturePage() {
                         animate={{ scale: 1, opacity: 1 }}
                         exit={{ scale: 0, opacity: 0 }}
                         whileTap={{ scale: 0.9 }}
-                        onClick={handleSave}
+                        onClick={handleOk}
                         disabled={saving}
-                        className="fixed bottom-20 right-5 z-50 flex items-center gap-2 px-5 py-3.5 rounded-full bg-[#2b6cee] text-white shadow-lg shadow-[#2b6cee]/30 font-semibold text-sm active:bg-[#2b6cee]/80 transition-colors disabled:opacity-50"
+                        className="fixed bottom-20 right-5 z-50 w-14 h-14 rounded-full bg-[#2b6cee] text-white shadow-lg shadow-[#2b6cee]/30 flex items-center justify-center active:bg-[#2b6cee]/80 transition-colors disabled:opacity-50"
                     >
                         {saving ? (
-                            <>
-                                <span className="material-symbols-outlined text-[20px] animate-spin">progress_activity</span>
-                                Saving...
-                            </>
+                            <span className="material-symbols-outlined text-[24px] animate-spin">progress_activity</span>
                         ) : (
-                            <>
-                                <span className="material-symbols-outlined text-[20px]">check</span>
-                                Save
-                            </>
+                            <span className="material-symbols-outlined text-[28px]">check</span>
                         )}
                     </motion.button>
                 )}

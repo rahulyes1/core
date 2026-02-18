@@ -84,7 +84,7 @@ export default function NoteCard({ note, onPin, onArchive, onDelete }: NoteCardP
     const handlePressEnd = () => {
         if (longPressTimer.current) clearTimeout(longPressTimer.current);
         if (!didLongPress.current) {
-            router.push(`/note/${note.id}`);
+            router.push(`/capture?id=${note.id}`);
         }
     };
 
@@ -159,7 +159,7 @@ export default function NoteCard({ note, onPin, onArchive, onDelete }: NoteCardP
                                 </button>
 
                                 <button
-                                    onClick={() => { router.push(`/note/${note.id}`); setShowActions(false); }}
+                                    onClick={() => { router.push(`/capture?id=${note.id}`); setShowActions(false); }}
                                     className="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl hover:bg-white/5 transition-colors text-left"
                                 >
                                     <span className="material-symbols-outlined text-[22px] text-gray-400">open_in_full</span>
