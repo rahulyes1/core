@@ -63,7 +63,9 @@ export default function NoteCard({ note, onPin, onArchive, onDelete }: NoteCardP
     const didLongPress = useRef(false);
 
     const title = note.title || note.content.replace(/<[^>]*>/g, '').split('\n')[0].slice(0, 40) || 'Untitled';
-    const preview = note.content.replace(/<[^>]*>/g, '').slice(0, 120);
+    const isLocked = note.locked_until && new Date(note.locked_until) > new Date();
+    const preview = isLocked ? 'This note is locked until ' + new Date(note.locked_until!).toLocaleDateString()
+        : note.content.replace(/<[^>]*>/g, '').slice(0, 120);
 
     const handleDragEnd = async (_: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
         const threshold = 80;
@@ -104,7 +106,7 @@ export default function NoteCard({ note, onPin, onArchive, onDelete }: NoteCardP
                 onPointerDown={handlePressStart}
                 onPointerUp={handlePressEnd}
                 onPointerLeave={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }}
-                className={`flex flex-col h-full p-4 rounded-xl border border-white/5 hover:border-white/10 transition-colors duration-150 cursor-pointer select-none aspect-[4/5] sm:aspect-square relative overflow-hidden ${note.image_url ? '' : 'bg-[#121212]'}`}
+                className={`group flex flex-col h-full p-4 rounded-xl border border-white/5 hover:border-white/10 transition-colors duration-150 cursor-pointer select-none aspect-[4/5] sm:aspect-square relative overflow-hidden ${note.image_url ? '' : 'bg-[#121212]'}`}
                 style={{ touchAction: 'pan-y' }}
             >
                 {note.image_url && (
@@ -132,8 +134,8 @@ export default function NoteCard({ note, onPin, onArchive, onDelete }: NoteCardP
                             )}
                         </div>
                     </div>
-                    <h3 className="text-base font-bold text-white leading-tight mb-2 line-clamp-2">{title}</h3>
-                    <p className="text-sm text-gray-400 mb-auto line-clamp-3 leading-relaxed">{preview}</p>
+                    <h3 className={`text-base font-bold text-white leading-tight mb-2 line-clamp-2 ${isLocked ? 'blur-sm select-none' : ''}`}>{isLocked ? 'Locked Note' : title}</h3>
+                    <p className={`text-sm text-gray-400 mb-auto line-clamp-3 leading-relaxed ${isLocked ? 'italic opacity-70' : ''}`}>{preview}</p>
                     <div className="flex gap-1.5 flex-wrap mt-3">
                         {note.tags.slice(0, 2).map(tag => (
                             <span key={tag} className={`text-[10px] px-2 py-0.5 rounded-md ${getTagColor(tag)}`}>
@@ -141,6 +143,24 @@ export default function NoteCard({ note, onPin, onArchive, onDelete }: NoteCardP
                             </span>
                         ))}
                     </div>
+                </div>
+
+                {/* Hover Actions */}
+                <div className="absolute bottom-3 right-3 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity z-20">
+                    <button
+                        onClick={(e) => { e.stopPropagation(); onPin(); }}
+                        className={`w-8 h-8 rounded-full flex items-center justify-center backdrop-blur-md shadow-lg transition-colors ${note.is_pinned ? 'bg-[#2b6cee] text-white' : 'bg-white/10 text-white hover:bg-white/20'}`}
+                        title={note.is_pinned ? "Unpin" : "Pin"}
+                    >
+                        <span className="material-symbols-outlined text-[18px]">push_pin</span>
+                    </button>
+                    <button
+                        onClick={(e) => { e.stopPropagation(); onDelete(); }}
+                        className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-white hover:bg-red-500/20 hover:text-red-400 backdrop-blur-md shadow-lg transition-colors"
+                        title="Delete"
+                    >
+                        <span className="material-symbols-outlined text-[18px]">delete</span>
+                    </button>
                 </div>
             </motion.article>
 
