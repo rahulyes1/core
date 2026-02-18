@@ -19,6 +19,7 @@ body {
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
+
 .no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
@@ -37,4 +38,56 @@ body {
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* TipTap Task List (To-Do) Styles */
+ul[data-type="taskList"] {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+ul[data-type="taskList"] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+ul[data-type="taskList"] li>label {
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+
+ul[data-type="taskList"] li>label input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  position: relative;
+  transition: all 0.15s;
+}
+
+ul[data-type="taskList"] li>label input[type="checkbox"]:checked {
+  background: #2b6cee;
+  border-color: #2b6cee;
+}
+
+ul[data-type="taskList"] li>label input[type="checkbox"]:checked::after {
+  content: '✓';
+  position: absolute;
+  top: -1px;
+  left: 2px;
+  font-size: 12px;
+  color: white;
+  font-weight: bold;
+}
+
+ul[data-type="taskList"] li[data-checked="true"]>div>p {
+  text-decoration: line-through;
+  color: rgba(255, 255, 255, 0.3);
 }

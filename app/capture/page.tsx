@@ -3,32 +3,32 @@
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
-import { useState, useCallback, useRef } from 'react';
+import TaskList from '@tiptap/extension-task-list';
+import TaskItem from '@tiptap/extension-task-item';
+import { useState, useRef } from 'react';
 import { supabase } from '@/utils/supabase/client';
 import { useAI } from '@/hooks/useAI';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 
-type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
+type NoteType = 'note' | 'todo';
 
 export default function CapturePage() {
     const router = useRouter();
     const [content, setContent] = useState('');
     const [title, setTitle] = useState('');
-    const [noteId, setNoteId] = useState<string | null>(null);
-    const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
-    const [errorMsg, setErrorMsg] = useState('');
+    const [noteType, setNoteType] = useState<NoteType>('note');
+    const [saving, setSaving] = useState(false);
     const { result: aiResult, loading: aiLoading } = useAI(content);
-    const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const contentRef = useRef('');
-    const titleRef = useRef('');
 
     const editor = useEditor({
         immediatelyRender: false,
         extensions: [
             StarterKit,
+            TaskList,
+            TaskItem.configure({ nested: true }),
             Placeholder.configure({
-                placeholder: "What's on your mind...",
+                placeholder: noteType === 'todo' ? 'Add your tasks...' : "What's on your mind...",
                 emptyEditorClass: 'is-editor-empty before:text-neutral-600 before:content-[attr(data-placeholder)] before:float-left before:h-0 before:pointer-events-none',
             }),
         ],
@@ -39,121 +39,97 @@ export default function CapturePage() {
             },
         },
         onUpdate: ({ editor }) => {
-            const html = editor.getHTML();
-            setContent(html);
-            contentRef.current = html;
-            // Auto-save after 2.5s of inactivity
-            if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-            saveTimeoutRef.current = setTimeout(() => {
-                if (contentRef.current && contentRef.current !== '<p></p>') {
-                    performSave(contentRef.current, titleRef.current);
-                }
-            }, 2500);
+            setContent(editor.getHTML());
         },
     });
 
-    const performSave = useCallback(async (htmlContent: string, noteTitle: string) => {
-        if (!htmlContent || htmlContent === '<p></p>') return;
-        setSaveStatus('saving');
-        setErrorMsg('');
+    const insertTodo = () => {
+        if (!editor) return;
+        editor.chain().focus().toggleTaskList().run();
+        setNoteType('todo');
+    };
+
+    const ensureUserProfile = async (user: any) => {
+        // Make sure user exists in public.users (for foreign key)
+        await supabase.from('users').upsert({
+            id: user.id,
+            email: user.email,
+            full_name: user.user_metadata?.full_name || null,
+            avatar_url: user.user_metadata?.avatar_url || null,
+        }, { onConflict: 'id' });
+    };
+
+    const handleSave = async () => {
+        if (!content || content === '<p></p>') return;
+        setSaving(true);
 
         try {
-            // Get current user
-            const { data: { user }, error: authError } = await supabase.auth.getUser();
-            if (authError || !user) {
-                setErrorMsg('Not signed in');
-                setSaveStatus('error');
-                return;
-            }
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) { router.push('/login'); return; }
 
-            // Build upsert payload — no title column if it doesn't exist yet
+            // Ensure profile exists
+            await ensureUserProfile(user);
+
             const payload: any = {
-                content: htmlContent,
+                content,
                 user_id: user.id,
                 updated_at: new Date().toISOString(),
             };
 
-            // Only add id if updating existing note
-            if (noteId) payload.id = noteId;
+            // Try with title
+            try {
+                const { error } = await supabase.from('notes').insert({
+                    ...payload,
+                    title: title || null,
+                });
+                if (error && error.message?.includes('title')) {
+                    // title column missing, save without
+                    await supabase.from('notes').insert(payload);
+                } else if (error) {
+                    throw error;
+                }
+            } catch (e) {
+                throw e;
+            }
 
-            // Try with title first, fall back without if column missing
-            let noteData: any = null;
-            let saveError: any = null;
-
-            const withTitle = await supabase
-                .from('notes')
-                .upsert({ ...payload, title: noteTitle || null })
-                .select()
-                .single();
-
-            if (withTitle.error?.message?.includes('title')) {
-                // title column doesn't exist yet, save without it
-                const withoutTitle = await supabase
+            // Handle AI tags
+            if (aiResult?.tags?.length) {
+                const { data: latestNote } = await supabase
                     .from('notes')
-                    .upsert(payload)
-                    .select()
+                    .select('id')
+                    .eq('user_id', user.id)
+                    .order('created_at', { ascending: false })
+                    .limit(1)
                     .single();
-                noteData = withoutTitle.data;
-                saveError = withoutTitle.error;
-            } else {
-                noteData = withTitle.data;
-                saveError = withTitle.error;
-            }
 
-            if (saveError) {
-                console.error('Save error:', saveError);
-                setErrorMsg(saveError.message);
-                setSaveStatus('error');
-                return;
-            }
-
-            if (noteData) {
-                setNoteId(noteData.id);
-
-                // Handle AI tags
-                if (aiResult?.tags?.length) {
+                if (latestNote) {
                     for (const tagName of aiResult.tags) {
                         try {
-                            const { data: existingTag } = await supabase
-                                .from('tags').select('id').eq('name', tagName).single();
-                            let tagId = existingTag?.id;
+                            let { data: existing } = await supabase.from('tags').select('id').eq('name', tagName).single();
+                            let tagId = existing?.id;
                             if (!tagId) {
-                                const { data: newTag } = await supabase
-                                    .from('tags').insert({ name: tagName }).select().single();
+                                const { data: newTag } = await supabase.from('tags').insert({ name: tagName }).select().single();
                                 tagId = newTag?.id;
                             }
                             if (tagId) {
-                                await supabase.from('note_tags').upsert({
-                                    note_id: noteData.id,
-                                    tag_id: tagId
-                                });
+                                await supabase.from('note_tags').upsert({ note_id: latestNote.id, tag_id: tagId });
                             }
-                        } catch (tagErr) {
-                            console.warn('Tag error (non-fatal):', tagErr);
-                        }
+                        } catch { }
                     }
                 }
             }
 
-            setSaveStatus('saved');
-            setTimeout(() => setSaveStatus('idle'), 2500);
-        } catch (e: any) {
-            console.error('Unexpected save error:', e);
-            setErrorMsg(e?.message || 'Unknown error');
-            setSaveStatus('error');
-        }
-    }, [noteId, aiResult]);
+            // Instant redirect home
+            router.push('/');
 
-    const handleManualSave = () => {
-        if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-        performSave(contentRef.current || content, titleRef.current || title);
+        } catch (e: any) {
+            console.error('Save failed:', e);
+            setSaving(false);
+            alert('Save failed: ' + (e?.message || 'Unknown error'));
+        }
     };
 
-    const handleBack = async () => {
-        if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-        if (content && content !== '<p></p>' && saveStatus !== 'saved') {
-            await performSave(contentRef.current || content, titleRef.current || title);
-        }
+    const handleBack = () => {
         router.push('/');
     };
 
@@ -166,31 +142,10 @@ export default function CapturePage() {
             {/* Top Bar */}
             <div className="flex items-center justify-between px-4 py-3 sticky top-0 bg-[#0a0a0a]/95 backdrop-blur-md z-50 border-b border-white/5">
                 <button onClick={handleBack} className="p-1.5 -ml-1.5 rounded-full hover:bg-white/5 transition-colors">
-                    <span className="material-symbols-outlined text-[24px] text-gray-400">arrow_back</span>
+                    <span className="material-symbols-outlined text-[24px] text-gray-400">close</span>
                 </button>
 
-                <div className="flex items-center gap-3">
-                    {/* Save status text */}
-                    <AnimatePresence mode="wait">
-                        {saveStatus !== 'idle' && (
-                            <motion.span
-                                key={saveStatus}
-                                initial={{ opacity: 0, y: -4 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                exit={{ opacity: 0 }}
-                                className={`text-xs font-medium ${saveStatus === 'saving' ? 'text-gray-500' :
-                                        saveStatus === 'saved' ? 'text-green-400' :
-                                            'text-red-400'
-                                    }`}
-                            >
-                                {saveStatus === 'saving' && '● Saving...'}
-                                {saveStatus === 'saved' && '✓ Saved'}
-                                {saveStatus === 'error' && `✕ ${errorMsg || 'Error'}`}
-                            </motion.span>
-                        )}
-                    </AnimatePresence>
-
-                    {/* AI indicator */}
+                <div className="flex items-center gap-2">
                     {aiLoading && (
                         <span className="text-xs text-[#2b6cee] flex items-center gap-1">
                             <span className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>
@@ -200,13 +155,37 @@ export default function CapturePage() {
                 </div>
             </div>
 
+            {/* Note Type Switcher */}
+            <div className="flex gap-2 px-4 pt-4">
+                <button
+                    onClick={() => setNoteType('note')}
+                    className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full transition-all ${noteType === 'note'
+                            ? 'bg-white text-black'
+                            : 'bg-[#1e1e1e] text-gray-400 border border-white/5'
+                        }`}
+                >
+                    <span className="material-symbols-outlined text-[14px]">edit_note</span>
+                    Note
+                </button>
+                <button
+                    onClick={() => { setNoteType('todo'); insertTodo(); }}
+                    className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full transition-all ${noteType === 'todo'
+                            ? 'bg-white text-black'
+                            : 'bg-[#1e1e1e] text-gray-400 border border-white/5'
+                        }`}
+                >
+                    <span className="material-symbols-outlined text-[14px]">checklist</span>
+                    To-Do
+                </button>
+            </div>
+
             {/* Title Input */}
             <input
                 type="text"
                 value={title}
-                onChange={e => { setTitle(e.target.value); titleRef.current = e.target.value; }}
-                placeholder="Title (optional)"
-                className="w-full bg-transparent text-white text-2xl font-bold px-4 pt-5 pb-2 focus:outline-none placeholder:text-gray-700"
+                onChange={e => setTitle(e.target.value)}
+                placeholder={noteType === 'todo' ? 'Task list name...' : 'Title (optional)'}
+                className="w-full bg-transparent text-white text-2xl font-bold px-4 pt-4 pb-2 focus:outline-none placeholder:text-gray-700"
             />
 
             {/* Editor */}
@@ -214,21 +193,70 @@ export default function CapturePage() {
                 <EditorContent editor={editor} />
             </div>
 
-            {/* AI Tags */}
-            {aiResult?.tags && aiResult.tags.length > 0 && (
-                <div className="px-4 py-2 flex gap-2 flex-wrap border-t border-white/5">
-                    <span className="text-xs text-gray-600">AI:</span>
-                    {aiResult.tags.map(tag => (
-                        <span key={tag} className="text-xs text-[#2b6cee] bg-[#2b6cee]/10 px-2 py-0.5 rounded-md">
-                            #{tag}
-                        </span>
-                    ))}
+            {/* Formatting toolbar */}
+            {editor && (
+                <div className="sticky bottom-16 z-30 px-4 pb-2 flex gap-1 overflow-x-auto no-scrollbar">
+                    <button
+                        onClick={() => editor.chain().focus().toggleBold().run()}
+                        className={`p-2 rounded-lg transition-colors ${editor.isActive('bold') ? 'bg-white/15 text-white' : 'text-gray-500 hover:text-white hover:bg-white/5'}`}
+                    >
+                        <span className="material-symbols-outlined text-[18px]">format_bold</span>
+                    </button>
+                    <button
+                        onClick={() => editor.chain().focus().toggleItalic().run()}
+                        className={`p-2 rounded-lg transition-colors ${editor.isActive('italic') ? 'bg-white/15 text-white' : 'text-gray-500 hover:text-white hover:bg-white/5'}`}
+                    >
+                        <span className="material-symbols-outlined text-[18px]">format_italic</span>
+                    </button>
+                    <button
+                        onClick={() => editor.chain().focus().toggleStrike().run()}
+                        className={`p-2 rounded-lg transition-colors ${editor.isActive('strike') ? 'bg-white/15 text-white' : 'text-gray-500 hover:text-white hover:bg-white/5'}`}
+                    >
+                        <span className="material-symbols-outlined text-[18px]">strikethrough_s</span>
+                    </button>
+                    <button
+                        onClick={() => editor.chain().focus().toggleBulletList().run()}
+                        className={`p-2 rounded-lg transition-colors ${editor.isActive('bulletList') ? 'bg-white/15 text-white' : 'text-gray-500 hover:text-white hover:bg-white/5'}`}
+                    >
+                        <span className="material-symbols-outlined text-[18px]">format_list_bulleted</span>
+                    </button>
+                    <button
+                        onClick={() => editor.chain().focus().toggleOrderedList().run()}
+                        className={`p-2 rounded-lg transition-colors ${editor.isActive('orderedList') ? 'bg-white/15 text-white' : 'text-gray-500 hover:text-white hover:bg-white/5'}`}
+                    >
+                        <span className="material-symbols-outlined text-[18px]">format_list_numbered</span>
+                    </button>
+                    <button
+                        onClick={() => editor.chain().focus().toggleTaskList().run()}
+                        className={`p-2 rounded-lg transition-colors ${editor.isActive('taskList') ? 'bg-white/15 text-white' : 'text-gray-500 hover:text-white hover:bg-white/5'}`}
+                    >
+                        <span className="material-symbols-outlined text-[18px]">check_box</span>
+                    </button>
+                    <button
+                        onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
+                        className={`p-2 rounded-lg transition-colors ${editor.isActive('heading') ? 'bg-white/15 text-white' : 'text-gray-500 hover:text-white hover:bg-white/5'}`}
+                    >
+                        <span className="material-symbols-outlined text-[18px]">title</span>
+                    </button>
+                    <button
+                        onClick={() => editor.chain().focus().toggleBlockquote().run()}
+                        className={`p-2 rounded-lg transition-colors ${editor.isActive('blockquote') ? 'bg-white/15 text-white' : 'text-gray-500 hover:text-white hover:bg-white/5'}`}
+                    >
+                        <span className="material-symbols-outlined text-[18px]">format_quote</span>
+                    </button>
                 </div>
             )}
 
-            {/* Bottom word count bar */}
-            <div className="sticky bottom-0 bg-[#0a0a0a]/95 backdrop-blur-md border-t border-white/5 px-4 py-3 pb-6">
+            {/* Bottom bar */}
+            <div className="sticky bottom-0 bg-[#0a0a0a]/95 backdrop-blur-md border-t border-white/5 px-4 py-3 pb-6 flex items-center justify-between">
                 <span className="text-xs text-gray-600">{wordCount} {wordCount === 1 ? 'word' : 'words'}</span>
+                {aiResult?.tags && (
+                    <div className="flex gap-1.5">
+                        {aiResult.tags.slice(0, 3).map(tag => (
+                            <span key={tag} className="text-[10px] text-[#2b6cee] bg-[#2b6cee]/10 px-1.5 py-0.5 rounded">#{tag}</span>
+                        ))}
+                    </div>
+                )}
             </div>
 
             {/* Floating Save Button — bottom right */}
@@ -238,25 +266,22 @@ export default function CapturePage() {
                         initial={{ scale: 0, opacity: 0 }}
                         animate={{ scale: 1, opacity: 1 }}
                         exit={{ scale: 0, opacity: 0 }}
-                        whileHover={{ scale: 1.05 }}
-                        whileTap={{ scale: 0.95 }}
-                        onClick={handleManualSave}
-                        disabled={saveStatus === 'saving'}
-                        className={`fixed bottom-20 right-5 z-50 flex items-center gap-2 px-5 py-3 rounded-full shadow-lg font-semibold text-sm transition-all ${saveStatus === 'saved'
-                                ? 'bg-green-500 text-white shadow-green-500/20'
-                                : saveStatus === 'error'
-                                    ? 'bg-red-500 text-white shadow-red-500/20'
-                                    : 'bg-[#2b6cee] text-white shadow-[#2b6cee]/30'
-                            } disabled:opacity-60`}
+                        whileTap={{ scale: 0.9 }}
+                        onClick={handleSave}
+                        disabled={saving}
+                        className="fixed bottom-20 right-5 z-50 flex items-center gap-2 px-5 py-3.5 rounded-full bg-[#2b6cee] text-white shadow-lg shadow-[#2b6cee]/30 font-semibold text-sm active:bg-[#2b6cee]/80 transition-colors disabled:opacity-50"
                     >
-                        <span className="material-symbols-outlined text-[20px]">
-                            {saveStatus === 'saving' ? 'progress_activity' :
-                                saveStatus === 'saved' ? 'check_circle' :
-                                    saveStatus === 'error' ? 'error' : 'save'}
-                        </span>
-                        {saveStatus === 'saving' ? 'Saving...' :
-                            saveStatus === 'saved' ? 'Saved!' :
-                                saveStatus === 'error' ? 'Retry' : 'Save'}
+                        {saving ? (
+                            <>
+                                <span className="material-symbols-outlined text-[20px] animate-spin">progress_activity</span>
+                                Saving...
+                            </>
+                        ) : (
+                            <>
+                                <span className="material-symbols-outlined text-[20px]">check</span>
+                                Save
+                            </>
+                        )}
                     </motion.button>
                 )}
             </AnimatePresence>
