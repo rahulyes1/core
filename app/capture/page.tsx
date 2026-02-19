@@ -72,8 +72,11 @@ function CaptureContent() {
     const [linkRange, setLinkRange] = useState<{ from: number, to: number } | null>(null);
     const [showOptions, setShowOptions] = useState(false);
     const [activeFormat, setActiveFormat] = useState<string | null>(null);
+    const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
     const recognitionRef = useRef<any>(null);
     const titleRef = useRef<HTMLTextAreaElement>(null);
+    const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
+    const currentNoteIdRef = useRef<string | null>(editId);
     const { result: aiResult, loading: aiLoading } = useAI(content);
 
     const editor = useEditor({
@@ -158,7 +161,10 @@ function CaptureContent() {
                 editor.commands.setContent(data.content || '');
                 setContent(data.content || '');
                 if (data.content?.includes('data-type="taskList"')) setNoteType('todo');
-                setTimeout(() => editor.commands.focus('end'), 100);
+                // Focus at end with longer delay to ensure editor is ready
+                setTimeout(() => {
+                    editor.commands.focus('end');
+                }, 300);
             }
             setLoaded(true);
         };
@@ -211,12 +217,83 @@ function CaptureContent() {
     };
 
     const ensureUserProfile = async (user: any) => {
-        await supabase.from('users').upsert({
-            id: user.id,
-            email: user.email,
-            full_name: user.user_metadata?.full_name || null,
-            avatar_url: user.user_metadata?.avatar_url || null,
-        }, { onConflict: 'id' });
+        try {
+            const { error } = await supabase.from('users').upsert({
+                id: user.id,
+                email: user.email,
+                full_name: user.user_metadata?.full_name || null,
+                avatar_url: user.user_metadata?.avatar_url || null,
+            }, { onConflict: 'id' });
+            if (error) console.warn('User profile upsert skipped:', error.message);
+        } catch (e) {
+            console.warn('ensureUserProfile failed:', e);
+        }
+    };
+
+    // Auto-save: persists note every 3 seconds when content changes
+    useEffect(() => {
+        if (!content || content === '<p></p>') return;
+        if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = setTimeout(() => {
+            autoSaveNote();
+        }, 3000);
+        return () => {
+            if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+        };
+    }, [content, title]);
+
+    const autoSaveNote = async () => {
+        if (!content || content === '<p></p>') return;
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+            await ensureUserProfile(user);
+
+            setAutoSaveStatus('saving');
+            const payload: any = {
+                content,
+                title: title || null,
+                user_id: user.id,
+                updated_at: new Date().toISOString(),
+                mood: mood || null,
+            };
+            if (ephemeralHours) {
+                payload.expires_at = new Date(Date.now() + ephemeralHours * 60 * 60 * 1000).toISOString();
+            }
+            if (lockedUntil) {
+                payload.locked_until = lockedUntil;
+            }
+
+            if (currentNoteIdRef.current) {
+                // Update existing note
+                const { error } = await supabase.from('notes').update(payload).eq('id', currentNoteIdRef.current);
+                if (error) {
+                    console.error('Auto-save update failed:', error);
+                    // Try without optional columns
+                    await supabase.from('notes').update({
+                        content, title: title || null, user_id: user.id, updated_at: new Date().toISOString(),
+                    }).eq('id', currentNoteIdRef.current);
+                }
+            } else {
+                // Create new note
+                const { data, error } = await supabase.from('notes').insert(payload).select('id').single();
+                if (error) {
+                    // Fallback: try minimal columns
+                    const { data: d2, error: e2 } = await supabase.from('notes').insert({
+                        content, title: title || null, user_id: user.id, updated_at: new Date().toISOString(),
+                    }).select('id').single();
+                    if (!e2 && d2) currentNoteIdRef.current = d2.id;
+                    else console.error('Auto-save insert failed:', e2);
+                } else if (data) {
+                    currentNoteIdRef.current = data.id;
+                }
+            }
+            setAutoSaveStatus('saved');
+            setTimeout(() => setAutoSaveStatus('idle'), 1500);
+        } catch (e) {
+            console.error('Auto-save error:', e);
+            setAutoSaveStatus('idle');
+        }
     };
 
     const handleSave = async () => {
@@ -229,6 +306,7 @@ function CaptureContent() {
 
             const payload: any = {
                 content,
+                title: title || null,
                 user_id: user.id,
                 updated_at: new Date().toISOString(),
                 mood: mood || null,
@@ -241,34 +319,40 @@ function CaptureContent() {
                 payload.locked_until = lockedUntil;
             }
 
-            if (editId) {
-                await supabase.from('notes').update({ ...payload, title: title || null }).eq('id', editId);
-            } else {
-                const { error } = await supabase.from('notes').insert({ ...payload, title: title || null });
-                if (error && error.message?.includes('mood')) {
-                    const { error: e2 } = await supabase.from('notes').insert({
-                        content, user_id: user.id, updated_at: new Date().toISOString(),
-                    });
+            if (currentNoteIdRef.current) {
+                // Note already exists (from auto-save or editId), just update
+                const { error } = await supabase.from('notes').update(payload).eq('id', currentNoteIdRef.current);
+                if (error) {
+                    // Fallback without optional columns
+                    const { error: e2 } = await supabase.from('notes').update({
+                        content, title: title || null, user_id: user.id, updated_at: new Date().toISOString(),
+                    }).eq('id', currentNoteIdRef.current);
                     if (e2) throw e2;
-                } else if (error) throw error;
+                }
+            } else {
+                const { data, error } = await supabase.from('notes').insert(payload).select('id').single();
+                if (error) {
+                    const { error: e2 } = await supabase.from('notes').insert({
+                        content, title: title || null, user_id: user.id, updated_at: new Date().toISOString(),
+                    }).select('id').single();
+                    if (e2) throw e2;
+                } else if (data) {
+                    currentNoteIdRef.current = data.id;
+                }
             }
 
             // AI tags
-            if (!editId && aiResult?.tags?.length) {
-                const { data: latestNote } = await supabase.from('notes').select('id')
-                    .eq('user_id', user.id).order('created_at', { ascending: false }).limit(1).single();
-                if (latestNote) {
-                    for (const tagName of aiResult.tags) {
-                        try {
-                            let { data: existing } = await supabase.from('tags').select('id').eq('name', tagName).single();
-                            let tagId = existing?.id;
-                            if (!tagId) {
-                                const { data: newTag } = await supabase.from('tags').insert({ name: tagName }).select().single();
-                                tagId = newTag?.id;
-                            }
-                            if (tagId) await supabase.from('note_tags').upsert({ note_id: latestNote.id, tag_id: tagId });
-                        } catch { }
-                    }
+            if (currentNoteIdRef.current && aiResult?.tags?.length) {
+                for (const tagName of aiResult.tags) {
+                    try {
+                        let { data: existing } = await supabase.from('tags').select('id').eq('name', tagName).single();
+                        let tagId = existing?.id;
+                        if (!tagId) {
+                            const { data: newTag } = await supabase.from('tags').insert({ name: tagName }).select().single();
+                            tagId = newTag?.id;
+                        }
+                        if (tagId) await supabase.from('note_tags').upsert({ note_id: currentNoteIdRef.current!, tag_id: tagId });
+                    } catch { }
                 }
             }
 
@@ -472,6 +556,33 @@ function CaptureContent() {
                                 ))}
                             </div>
                         )}
+
+                        {/* Auto-save status */}
+                        {autoSaveStatus === 'saving' && (
+                            <span style={{ fontSize: 10, color: styles.textDim, fontWeight: 500 }}>Saving...</span>
+                        )}
+                        {autoSaveStatus === 'saved' && (
+                            <span style={{ fontSize: 10, color: '#34d399', fontWeight: 500 }}>Saved</span>
+                        )}
+
+                        {/* Mic button - top bar */}
+                        <button
+                            onClick={toggleVoice}
+                            style={{
+                                background: isListening ? 'rgba(248,113,113,0.15)' : 'none',
+                                border: isListening ? '1px solid rgba(248,113,113,0.3)' : '1px solid transparent',
+                                color: isListening ? '#f87171' : styles.textMuted,
+                                width: 34, height: 34, borderRadius: 20, cursor: 'pointer',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                transition: 'all 0.2s ease',
+                            }}
+                        >
+                            <svg width="14" height="16" viewBox="0 0 15 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                                <rect x="4.5" y="1" width="6" height="11" rx="3" />
+                                <path d="M1 9a6.5 6.5 0 0013 0" />
+                                <line x1="7.5" y1="15" x2="7.5" y2="19" />
+                            </svg>
+                        </button>
 
                         {/* Options */}
                         <button
@@ -846,25 +957,6 @@ function CaptureContent() {
                                         fontSize: 20, fontFamily: 'Georgia, serif', lineHeight: 1,
                                     }}
                                 >&ldquo;</button>
-
-                                {/* Voice */}
-                                <button
-                                    className={`fmt-btn ${isListening ? 'active' : ''}`}
-                                    onClick={toggleVoice}
-                                    style={{
-                                        background: isListening ? 'rgba(248,113,113,0.15)' : 'none',
-                                        border: 'none',
-                                        color: isListening ? '#f87171' : styles.textMuted,
-                                        width: 38, height: 38, borderRadius: 8, cursor: 'pointer',
-                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                    }}
-                                >
-                                    <svg width="15" height="18" viewBox="0 0 15 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-                                        <rect x="4.5" y="1" width="6" height="11" rx="3" />
-                                        <path d="M1 9a6.5 6.5 0 0013 0" />
-                                        <line x1="7.5" y1="15" x2="7.5" y2="19" />
-                                    </svg>
-                                </button>
                             </div>
 
                             {/* Right: Save button */}
