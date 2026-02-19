@@ -39,6 +39,11 @@ Core is a sleek, dark-themed PWA notes application built with Next.js, Tailwind 
    npm run build
    ```
 
+5. **Deploy with Vercel**:
+   ```bash
+   npx vercel --prod
+   ```
+
 ## Tech Stack
 
 - **Framework**: Next.js 16 (App Router)

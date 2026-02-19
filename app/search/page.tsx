@@ -31,9 +31,13 @@ export default function SearchPage() {
     const search = async (q: string) => {
         setLoading(true);
         try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) { setLoading(false); return; }
+
             const { data } = await supabase
                 .from('notes')
                 .select(`*, note_tags(tags(name))`)
+                .eq('user_id', user.id)
                 .or(`content.ilike.%${q}%,title.ilike.%${q}%`)
                 .eq('is_archived', false)
                 .order('created_at', { ascending: false })

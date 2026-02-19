@@ -6,10 +6,8 @@ import FAB from '../components/home/FAB';
 export default function Home() {
   return (
     <div className="min-h-screen bg-[#0a0a0a] flex flex-col overflow-hidden">
-      <div className="min-h-screen bg-[#0a0a0a] flex flex-col overflow-hidden">
-        <NoteFeed />
-        <FAB />
-      </div>
+      <NoteFeed />
+      <FAB />
     </div>
   );
 }

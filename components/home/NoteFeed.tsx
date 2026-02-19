@@ -41,14 +41,22 @@ export default function NoteFeed() {
             .channel('realtime notes')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'notes' }, () => fetchNotes())
             .subscribe();
-        return () => { supabase.removeChannel(channel); };
+        return () => {
+            supabase.removeChannel(channel);
+            // Bug 7 fix: clean up undo timer on unmount
+            if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+        };
     }, []);
 
     const fetchNotes = async () => {
         try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) { setLoading(false); return; }
+
             const { data, error } = await supabase
                 .from('notes')
                 .select(`*, note_tags(tags(name))`)
+                .eq('user_id', user.id)
                 .eq('is_archived', false)
                 .order('is_pinned', { ascending: false })
                 .order('created_at', { ascending: false });
@@ -93,9 +101,13 @@ export default function NoteFeed() {
         const month = now.getMonth() + 1;
         const day = now.getDate();
         try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+
             const { data } = await supabase
                 .from('notes')
                 .select('*')
+                .eq('user_id', user.id)
                 .eq('is_archived', false)
                 .not('created_at', 'gte', new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString())
                 .order('created_at', { ascending: false })
@@ -162,33 +174,37 @@ export default function NoteFeed() {
                 <div className="px-4 pb-6 space-y-5 pt-20">
 
                     {/* Daily Digest + Streak */}
-                    <div className="relative rounded-xl p-[1px] bg-gradient-to-br from-[#2b6cee]/60 via-purple-500/30 to-transparent">
-                        <div className="bg-[#121212]/95 backdrop-blur-sm rounded-xl p-5 relative overflow-hidden group">
-                            <div className="absolute -top-10 -right-10 w-32 h-32 bg-[#2b6cee]/20 rounded-full blur-3xl group-hover:bg-[#2b6cee]/30 transition-all duration-700" />
+                    <div className="relative">
+                        <div className="glass-panel rounded-2xl p-5 relative overflow-hidden group border border-white/10">
+                            <div className="absolute -top-10 -right-10 w-40 h-40 bg-blue-500/20 rounded-full blur-[50px] group-hover:bg-blue-500/30 transition-all duration-700" />
+                            <div className="absolute bottom-0 left-0 w-32 h-32 bg-purple-500/10 rounded-full blur-[40px]" />
+
                             <div className="relative z-10">
                                 <div className="flex items-center justify-between mb-3">
                                     <div className="flex items-center gap-2">
-                                        <span className="material-symbols-outlined text-[#2b6cee] text-[20px]">auto_awesome</span>
-                                        <p className="text-xs font-semibold text-[#2b6cee] uppercase tracking-wider">Daily Digest</p>
+                                        <div className="p-1.5 rounded-lg bg-blue-500/10">
+                                            <span className="material-symbols-outlined text-blue-400 text-[18px]">auto_awesome</span>
+                                        </div>
+                                        <p className="text-[10px] font-bold text-blue-400 uppercase tracking-widest">Daily Digest</p>
                                     </div>
                                     {streak > 0 && (
-                                        <div className="flex items-center gap-1 bg-orange-500/15 px-2.5 py-1 rounded-full">
+                                        <div className="flex items-center gap-1.5 bg-orange-500/10 px-3 py-1 rounded-full border border-orange-500/20">
                                             <span className="text-sm">🔥</span>
                                             <span className="text-xs font-bold text-orange-400">{streak} day{streak !== 1 && 's'}</span>
                                         </div>
                                     )}
                                 </div>
-                                <h2 className="text-xl font-bold text-white mb-2 leading-tight">
+                                <h2 className="text-2xl font-bold text-white mb-2 leading-tight tracking-tight">
                                     {notes.length === 0 ? 'Start capturing thoughts' : `${notes.length} note${notes.length !== 1 ? 's' : ''} captured`}
                                 </h2>
-                                <p className="text-gray-300 text-sm leading-relaxed mb-4">
+                                <p className="text-gray-400 text-sm leading-relaxed mb-5 max-w-[90%]">
                                     {notes.length === 0
                                         ? 'Tap the + button below to write your first note.'
                                         : streak > 1
                                             ? `You're on a ${streak}-day streak! Keep it going 🔥`
                                             : 'Keep the momentum going. Tap + to add a new thought.'}
                                 </p>
-                                <Link href="/capture" className="flex items-center gap-1 text-sm text-white font-medium hover:text-[#2b6cee] transition-colors group/btn">
+                                <Link href="/capture" className="inline-flex items-center gap-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-full transition-all shadow-lg shadow-blue-600/20 group/btn">
                                     New note
                                     <span className="material-symbols-outlined text-[16px] group-hover/btn:translate-x-1 transition-transform">arrow_forward</span>
                                 </Link>
@@ -198,23 +214,25 @@ export default function NoteFeed() {
 
                     {/* On This Day */}
                     {onThisDayNotes.length > 0 && (
-                        <div className="rounded-xl bg-gradient-to-br from-purple-900/20 to-[#121212] border border-purple-500/10 p-4">
+                        <div className="glass-panel rounded-2xl p-4 border border-purple-500/20 bg-purple-500/5">
                             <div className="flex items-center gap-2 mb-3">
                                 <span className="material-symbols-outlined text-purple-400 text-[20px]">history</span>
-                                <p className="text-xs font-semibold text-purple-400 uppercase tracking-wider">On This Day</p>
+                                <p className="text-xs font-bold text-purple-400 uppercase tracking-wider">On This Day</p>
                             </div>
-                            {onThisDayNotes.slice(0, 2).map(n => {
-                                const year = new Date(n.created_at).getFullYear();
-                                return (
-                                    <Link key={n.id} href={`/capture?id=${n.id}`}
-                                        className="flex items-center gap-3 py-2 hover:bg-white/5 rounded-lg px-2 -mx-2 transition-colors"
-                                    >
-                                        <span className="text-[11px] text-purple-300/50 font-mono w-8 shrink-0">{year}</span>
-                                        <p className="text-sm text-gray-300 line-clamp-1">{stripHtml(n.content).slice(0, 80)}</p>
-                                        {n.mood && <span className="text-sm">{n.mood}</span>}
-                                    </Link>
-                                );
-                            })}
+                            <div className="space-y-2">
+                                {onThisDayNotes.slice(0, 2).map(n => {
+                                    const year = new Date(n.created_at).getFullYear();
+                                    return (
+                                        <Link key={n.id} href={`/capture?id=${n.id}`}
+                                            className="flex items-center gap-3 p-2 hover:bg-white/5 rounded-xl transition-colors group"
+                                        >
+                                            <span className="text-[10px] text-purple-300/50 font-mono py-1 px-2 rounded-md bg-purple-500/10">{year}</span>
+                                            <p className="text-sm text-gray-300 line-clamp-1 group-hover:text-white transition-colors">{stripHtml(n.content).slice(0, 80)}</p>
+                                            {n.mood && <span className="text-sm ml-auto">{n.mood}</span>}
+                                        </Link>
+                                    );
+                                })}
+                            </div>
                         </div>
                     )}
 
@@ -226,12 +244,12 @@ export default function NoteFeed() {
                     )}
 
                     {/* Filter Chips */}
-                    <div className="flex gap-3 overflow-x-auto no-scrollbar pb-1">
+                    <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
                         {ALL_TAGS.map(tag => (
                             <button key={tag} onClick={() => setActiveTag(tag)}
-                                className={`flex h-8 shrink-0 items-center justify-center gap-x-2 rounded-full px-4 transition-all active:scale-95 text-sm font-medium ${activeTag === tag
-                                    ? 'bg-white text-black font-semibold'
-                                    : 'bg-[#1e1e1e] border border-white/5 text-gray-300 hover:bg-white/5'
+                                className={`flex h-8 shrink-0 items-center justify-center gap-x-2 rounded-full px-4 transition-all active:scale-95 text-xs font-medium border ${activeTag === tag
+                                    ? 'bg-white text-black border-white shadow-[0_0_10px_rgba(255,255,255,0.3)]'
+                                    : 'bg-white/5 border-white/5 text-gray-400 hover:bg-white/10'
                                     }`}
                             >{tag}</button>
                         ))}
@@ -273,10 +291,10 @@ export default function NoteFeed() {
                         initial={{ opacity: 0, y: 50 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: 50 }}
-                        className="fixed bottom-24 left-4 right-4 z-50 flex items-center justify-between bg-[#1e1e1e] border border-white/10 rounded-xl p-4 shadow-xl"
+                        className="fixed bottom-24 left-4 right-4 z-50 flex items-center justify-between glass-panel rounded-xl p-4 shadow-xl border border-white/10"
                     >
-                        <span className="text-sm text-white">Note deleted</span>
-                        <button onClick={handleUndo} className="text-sm font-bold text-[#2b6cee] hover:text-[#2b6cee]/80">
+                        <span className="text-sm text-white font-medium">Note deleted</span>
+                        <button onClick={handleUndo} className="text-sm font-bold text-blue-400 hover:text-blue-300">
                             Undo
                         </button>
                     </motion.div>
@@ -297,17 +315,16 @@ function BottomNav() {
         { href: '/settings', icon: 'settings', label: 'Settings' },
     ];
     return (
-        <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-white/5 bg-[#0a0a0a]/90 backdrop-blur-xl px-4 pb-6 pt-3">
+        <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-white/5 glass-header px-6 pb-6 pt-4">
             <div className="flex items-center justify-between max-w-md mx-auto">
                 {navItems.map(item => {
                     const isActive = pathname === item.href;
                     return (
                         <Link key={item.href} href={item.href}
-                            className={`flex flex-1 flex-col items-center justify-end gap-1 transition-colors ${isActive ? 'text-white' : 'text-gray-500 hover:text-white'}`}
+                            className={`flex flex-col items-center justify-center gap-1 transition-all duration-300 ${isActive ? 'text-white scale-110' : 'text-gray-500 hover:text-gray-300'}`}
                         >
-                            <div className="flex h-7 items-center justify-center relative">
-                                <span className="material-symbols-outlined text-[26px]">{item.icon}</span>
-                                {isActive && <span className="absolute -bottom-2 w-1 h-1 bg-[#2b6cee] rounded-full" />}
+                            <div className={`flex items-center justify-center relative rounded-xl p-1 ${isActive ? 'bg-white/10' : ''}`}>
+                                <span className={`material-symbols-outlined text-[24px] ${isActive ? 'fill-current' : ''}`}>{item.icon}</span>
                             </div>
                         </Link>
                     );
@@ -316,3 +333,4 @@ function BottomNav() {
         </nav>
     );
 }
+

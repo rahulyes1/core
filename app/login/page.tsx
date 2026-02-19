@@ -14,7 +14,7 @@ export default function LoginPage() {
                 redirectTo: `${window.location.origin}/auth/callback`,
             },
         });
-        setLoading(false);
+        // Don't setLoading(false) — OAuth triggers a full-page redirect
     };
 
     return (

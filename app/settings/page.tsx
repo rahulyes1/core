@@ -49,8 +49,8 @@ export default function SettingsPage() {
     return (
         <div className="min-h-screen bg-[#0a0a0a] text-white flex flex-col">
             {/* Header */}
-            <div className="sticky top-0 z-50 bg-[#0a0a0a]/95 backdrop-blur-md border-b border-white/5 px-4 pt-14 pb-4">
-                <h1 className="text-2xl font-bold text-white">Settings</h1>
+            <div className="sticky top-0 z-50 glass-header px-4 pt-14 pb-4">
+                <h1 className="text-2xl font-bold text-white tracking-tight">Settings</h1>
             </div>
 
             <div className="flex-1 px-4 py-6 pb-28 space-y-6">
@@ -58,10 +58,11 @@ export default function SettingsPage() {
                 <motion.div
                     initial={{ opacity: 0, y: 12 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="p-5 rounded-2xl bg-gradient-to-br from-[#121212] to-[#1a1a1a] border border-white/5"
+                    className="p-5 rounded-2xl glass-panel relative overflow-hidden"
                 >
-                    <div className="flex items-center gap-4">
-                        <div className="w-16 h-16 rounded-2xl bg-gray-800 overflow-hidden border-2 border-white/10 flex items-center justify-center shrink-0">
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 rounded-full blur-3xl" />
+                    <div className="flex items-center gap-4 relative z-10">
+                        <div className="w-16 h-16 rounded-2xl bg-gray-800 overflow-hidden border-2 border-white/10 flex items-center justify-center shrink-0 shadow-lg">
                             {avatarUrl ? (
                                 <img src={avatarUrl} alt={fullName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                             ) : (
@@ -70,10 +71,10 @@ export default function SettingsPage() {
                         </div>
                         <div className="min-w-0">
                             <h2 className="text-lg font-bold text-white truncate">{fullName}</h2>
-                            <p className="text-sm text-gray-500 truncate">{email}</p>
+                            <p className="text-sm text-gray-400 truncate">{email}</p>
                             <div className="flex items-center gap-1.5 mt-1.5">
-                                <span className="w-2 h-2 rounded-full bg-green-400" />
-                                <span className="text-xs text-green-400">Signed in with Google</span>
+                                <span className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
+                                <span className="text-xs text-green-400 font-medium">Synced</span>
                             </div>
                         </div>
                     </div>
@@ -87,18 +88,18 @@ export default function SettingsPage() {
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: gi * 0.08 }}
                     >
-                        <p className="text-xs text-gray-600 uppercase tracking-wider font-semibold mb-2 px-1">{group.title}</p>
-                        <div className="bg-[#121212] rounded-xl border border-white/5 overflow-hidden divide-y divide-white/5">
+                        <p className="text-xs text-gray-500 uppercase tracking-widest font-bold mb-3 px-1">{group.title}</p>
+                        <div className="glass-panel rounded-2xl overflow-hidden divide-y divide-white/5">
                             {group.items.map((item) => (
-                                <div key={item.label} className="flex items-center gap-3 px-4 py-3.5 hover:bg-white/[0.02] transition-colors">
-                                    <div className="w-9 h-9 rounded-lg bg-white/5 flex items-center justify-center shrink-0">
-                                        <span className="material-symbols-outlined text-[20px] text-gray-400">{item.icon}</span>
+                                <div key={item.label} className="flex items-center gap-3 px-4 py-4 hover:bg-white/5 transition-colors cursor-pointer group">
+                                    <div className="w-9 h-9 rounded-xl bg-white/5 flex items-center justify-center shrink-0 group-hover:bg-blue-500/20 group-hover:text-blue-400 transition-colors">
+                                        <span className="material-symbols-outlined text-[20px] text-gray-400 group-hover:text-blue-400">{item.icon}</span>
                                     </div>
                                     <div className="flex-1 min-w-0">
-                                        <p className="text-sm text-white font-medium">{item.label}</p>
+                                        <p className="text-sm text-gray-200 font-medium">{item.label}</p>
                                     </div>
-                                    <p className="text-xs text-gray-600 shrink-0">{item.desc}</p>
-                                    <span className="material-symbols-outlined text-[16px] text-gray-700">chevron_right</span>
+                                    <p className="text-xs text-gray-500 shrink-0">{item.desc}</p>
+                                    <span className="material-symbols-outlined text-[16px] text-gray-600">chevron_right</span>
                                 </div>
                             ))}
                         </div>
@@ -113,7 +114,7 @@ export default function SettingsPage() {
                 >
                     <button
                         onClick={() => setShowLogoutConfirm(true)}
-                        className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 font-semibold text-sm hover:bg-red-500/15 active:scale-[0.99] transition-all"
+                        className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-400 font-bold text-sm hover:bg-red-500/20 active:scale-[0.99] transition-all"
                     >
                         <span className="material-symbols-outlined text-[20px]">logout</span>
                         Sign Out
@@ -122,11 +123,10 @@ export default function SettingsPage() {
 
                 {/* Footer */}
                 <div className="text-center pt-4 pb-8">
-                    <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#2b6cee] to-purple-600 flex items-center justify-center text-white font-bold text-xs mx-auto mb-2">
+                    <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#2b6cee] to-purple-600 flex items-center justify-center text-white font-bold text-xs mx-auto mb-2 shadow-lg">
                         C
                     </div>
-                    <p className="text-[10px] text-gray-700">Core Notes v1.0.0</p>
-                    <p className="text-[10px] text-gray-800">Made with ❤️</p>
+                    <p className="text-[10px] text-gray-600 font-medium">Core Notes v1.0.0</p>
                 </div>
             </div>
 
@@ -136,7 +136,7 @@ export default function SettingsPage() {
                     <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
-                        className="fixed inset-0 bg-black/60 z-50 backdrop-blur-sm"
+                        className="fixed inset-0 bg-black/80 z-50 backdrop-blur-md"
                         onClick={() => setShowLogoutConfirm(false)}
                     />
                     <motion.div

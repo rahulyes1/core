@@ -61,11 +61,16 @@ export default function NoteCard({ note, onPin, onArchive, onDelete }: NoteCardP
     const [showShare, setShowShare] = useState(false);
     const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const didLongPress = useRef(false);
+    const didDrag = useRef(false);
 
     const title = note.title || note.content.replace(/<[^>]*>/g, '').split('\n')[0].slice(0, 40) || 'Untitled';
     const isLocked = note.locked_until && new Date(note.locked_until) > new Date();
     const preview = isLocked ? 'This note is locked until ' + new Date(note.locked_until!).toLocaleDateString()
         : note.content.replace(/<[^>]*>/g, '').slice(0, 120);
+
+    const handleDragStart = () => {
+        didDrag.current = true;
+    };
 
     const handleDragEnd = async (_: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
         const threshold = 80;
@@ -82,6 +87,7 @@ export default function NoteCard({ note, onPin, onArchive, onDelete }: NoteCardP
 
     const handlePressStart = () => {
         didLongPress.current = false;
+        didDrag.current = false;
         longPressTimer.current = setTimeout(() => {
             didLongPress.current = true;
             setShowActions(true);
@@ -90,7 +96,7 @@ export default function NoteCard({ note, onPin, onArchive, onDelete }: NoteCardP
 
     const handlePressEnd = () => {
         if (longPressTimer.current) clearTimeout(longPressTimer.current);
-        if (!didLongPress.current) {
+        if (!didLongPress.current && !didDrag.current) {
             router.push(`/capture?id=${note.id}`);
         }
     };
@@ -101,44 +107,45 @@ export default function NoteCard({ note, onPin, onArchive, onDelete }: NoteCardP
                 drag="x"
                 dragConstraints={{ left: 0, right: 0 }}
                 dragElastic={0.2}
+                onDragStart={handleDragStart}
                 onDragEnd={handleDragEnd}
                 animate={controls}
                 onPointerDown={handlePressStart}
                 onPointerUp={handlePressEnd}
                 onPointerLeave={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }}
-                className={`group flex flex-col h-full p-4 rounded-xl border border-white/5 hover:border-white/10 transition-colors duration-150 cursor-pointer select-none aspect-[4/5] sm:aspect-square relative overflow-hidden ${note.image_url ? '' : 'bg-[#121212]'}`}
+                className={`group flex flex-col h-full p-4 rounded-xl glass-card transition-all duration-300 cursor-pointer select-none aspect-[4/5] sm:aspect-square relative overflow-hidden ${note.image_url ? '' : ''}`}
                 style={{ touchAction: 'pan-y' }}
             >
                 {note.image_url && (
                     <div className="absolute inset-0 z-0">
-                        <img src={note.image_url} alt="" className="w-full h-full object-cover opacity-30" />
-                        <div className="absolute inset-0 bg-gradient-to-t from-[#121212] via-[#121212]/60 to-transparent" />
+                        <img src={note.image_url} alt="" className="w-full h-full object-cover opacity-50 transition-opacity group-hover:opacity-40" />
+                        <div className="absolute inset-0 bg-gradient-to-t from-[#0a0a0a] via-[#0a0a0a]/70 to-transparent" />
                     </div>
                 )}
 
                 <div className="relative z-10 flex flex-col h-full">
-                    <div className="flex justify-between items-start mb-2">
-                        <div className="flex items-center gap-1.5 min-w-0">
-                            <span className="text-xs text-gray-500 shrink-0">{formatTime(note.created_at)}</span>
+                    <div className="flex justify-between items-start mb-3">
+                        <div className="flex items-center gap-2 min-w-0">
+                            <span className="text-[10px] uppercase tracking-wider font-semibold text-gray-500 bg-white/5 px-2 py-0.5 rounded-full backdrop-blur-sm">{formatTime(note.created_at)}</span>
                             {note.mood && <span className="text-sm">{note.mood}</span>}
                         </div>
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1.5">
                             {note.locked_until && new Date(note.locked_until) > new Date() && (
-                                <span className="material-symbols-outlined text-[14px] text-purple-400">lock</span>
+                                <span className="material-symbols-outlined text-[14px] text-purple-400 drop-shadow-[0_0_8px_rgba(192,132,252,0.5)]">lock</span>
                             )}
                             {note.expires_at && new Date(note.expires_at) > new Date() && (
-                                <span className="material-symbols-outlined text-[14px] text-orange-400">local_fire_department</span>
+                                <span className="material-symbols-outlined text-[14px] text-orange-400 drop-shadow-[0_0_8px_rgba(251,146,60,0.5)]">local_fire_department</span>
                             )}
                             {note.is_pinned && (
-                                <span className="material-symbols-outlined text-[14px] text-[#2b6cee]">push_pin</span>
+                                <span className="material-symbols-outlined text-[14px] text-blue-400 drop-shadow-[0_0_8px_rgba(96,165,250,0.5)]">push_pin</span>
                             )}
                         </div>
                     </div>
-                    <h3 className={`text-base font-bold text-white leading-tight mb-2 line-clamp-2 ${isLocked ? 'blur-sm select-none' : ''}`}>{isLocked ? 'Locked Note' : title}</h3>
-                    <p className={`text-sm text-gray-400 mb-auto line-clamp-3 leading-relaxed ${isLocked ? 'italic opacity-70' : ''}`}>{preview}</p>
-                    <div className="flex gap-1.5 flex-wrap mt-3">
+                    <h3 className={`text-lg font-bold text-white leading-tight mb-2 line-clamp-2 ${isLocked ? 'blur-sm select-none' : 'group-hover:text-blue-400 transition-colors'}`}>{isLocked ? 'Locked Note' : title}</h3>
+                    <p className={`text-sm text-gray-400 mb-auto line-clamp-3 leading-relaxed ${isLocked ? 'italic opacity-50' : ''}`}>{preview}</p>
+                    <div className="flex gap-1.5 flex-wrap mt-4">
                         {note.tags.slice(0, 2).map(tag => (
-                            <span key={tag} className={`text-[10px] px-2 py-0.5 rounded-md ${getTagColor(tag)}`}>
+                            <span key={tag} className={`text-[10px] px-2.5 py-1 rounded-full border border-white/5 ${getTagColor(tag)}`}>
                                 #{tag}
                             </span>
                         ))}
@@ -147,17 +154,19 @@ export default function NoteCard({ note, onPin, onArchive, onDelete }: NoteCardP
 
 
                 {/* Actions (Always Visible) */}
-                <div className="absolute top-3 right-3 flex gap-2 z-20">
+                <div className="absolute top-3 right-3 flex gap-2 z-20 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
                     <button
+                        onPointerDown={(e) => e.stopPropagation()}
                         onClick={(e) => { e.stopPropagation(); onPin(); }}
-                        className={`w-8 h-8 rounded-full flex items-center justify-center backdrop-blur-md shadow-lg transition-colors ${note.is_pinned ? 'bg-[#2b6cee] text-white' : 'bg-black/40 text-white/70 hover:bg-black/60 hover:text-white'}`}
+                        className={`w-8 h-8 rounded-full flex items-center justify-center backdrop-blur-md border border-white/10 shadow-lg transition-all hover:scale-110 ${note.is_pinned ? 'bg-blue-500 text-white' : 'bg-black/50 text-white/70 hover:bg-black/70 hover:text-white'}`}
                         title={note.is_pinned ? "Unpin" : "Pin"}
                     >
                         <span className="material-symbols-outlined text-[16px]">push_pin</span>
                     </button>
                     <button
+                        onPointerDown={(e) => e.stopPropagation()}
                         onClick={(e) => { e.stopPropagation(); onDelete(); }}
-                        className="w-8 h-8 rounded-full bg-black/40 flex items-center justify-center text-white/70 hover:bg-red-500/20 hover:text-red-400 backdrop-blur-md shadow-lg transition-colors"
+                        className="w-8 h-8 rounded-full bg-black/50 flex items-center justify-center text-white/70 hover:bg-red-500/20 hover:text-red-400 hover:border-red-500/30 border border-white/10 backdrop-blur-md shadow-lg transition-all hover:scale-110"
                         title="Delete"
                     >
                         <span className="material-symbols-outlined text-[16px]">delete</span>

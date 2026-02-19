@@ -6,6 +6,16 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/utils/supabase/client';
 import { useParams, useRouter } from 'next/navigation';
 
+// Bug 12 fix: sanitize HTML to prevent XSS
+function sanitizeHtml(html: string): string {
+    return html
+        .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+        .replace(/\son\w+\s*=\s*["'][^"']*["']/gi, '')
+        .replace(/\son\w+\s*=\s*[^\s>]*/gi, '')
+        .replace(/href\s*=\s*["']javascript:[^"']*["']/gi, 'href="#"')
+        .replace(/src\s*=\s*["']javascript:[^"']*["']/gi, 'src=""');
+}
+
 export default function NoteView() {
     const params = useParams();
     const router = useRouter();
@@ -18,10 +28,14 @@ export default function NoteView() {
     useEffect(() => {
         if (!id) return;
         const fetchNote = async () => {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) { setLoading(false); return; }
+
             const { data } = await supabase
                 .from('notes')
                 .select(`*, note_tags(tags(name))`)
                 .eq('id', id)
+                .eq('user_id', user.id)
                 .single();
             if (data) setNote({ ...data, tags: data.note_tags?.map((nt: any) => nt.tags?.name).filter(Boolean) ?? [] });
             setLoading(false);
@@ -82,6 +96,11 @@ export default function NoteView() {
                 </Link>
 
                 <div className="flex items-center gap-2">
+                    {/* Edit button (Bug 4 fix) */}
+                    <Link href={`/capture?id=${id}`} className="p-1.5 rounded-full hover:bg-white/5 transition-colors">
+                        <span className="material-symbols-outlined text-[24px] text-gray-400">edit</span>
+                    </Link>
+
                     {/* Pin indicator */}
                     {note.is_pinned && (
                         <span className="material-symbols-outlined text-[18px] text-[#2b6cee]">push_pin</span>
@@ -159,7 +178,7 @@ export default function NoteView() {
                 {/* Note content */}
                 <div
                     className="prose prose-invert prose-base max-w-none text-gray-200 leading-relaxed"
-                    dangerouslySetInnerHTML={{ __html: note.content }}
+                    dangerouslySetInnerHTML={{ __html: sanitizeHtml(note.content || '') }}
                 />
 
                 {/* Tags */}
@@ -183,8 +202,8 @@ export default function NoteView() {
                     <button
                         onClick={handlePin}
                         className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-full border transition-colors ${note.is_pinned
-                                ? 'border-[#2b6cee]/40 text-[#2b6cee] bg-[#2b6cee]/10'
-                                : 'border-white/10 text-gray-400 hover:text-white'
+                            ? 'border-[#2b6cee]/40 text-[#2b6cee] bg-[#2b6cee]/10'
+                            : 'border-white/10 text-gray-400 hover:text-white'
                             }`}
                     >
                         <span className="material-symbols-outlined text-[16px]">push_pin</span>
@@ -199,6 +218,6 @@ export default function NoteView() {
                     </button>
                 </div>
             </div>
-        </div>
+        </div >
     );
 }

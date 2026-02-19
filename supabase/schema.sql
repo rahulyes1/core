@@ -14,8 +14,10 @@ create table public.users (
 create table public.notes (
   id uuid default uuid_generate_v4() primary key,
   user_id uuid references public.users(id) on delete cascade not null,
+  title text,
   content text,
-  summary text, -- Added summary column
+  summary text,
+  image_url text,
   is_pinned boolean default false,
   is_archived boolean default false,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
@@ -50,6 +52,9 @@ alter table public.note_tags enable row level security;
 -- Users: Can view and update their own profile
 create policy "Users can view own profile" on public.users
   for select using (auth.uid() = id);
+
+create policy "Users can insert own profile" on public.users
+  for insert with check (auth.uid() = id);
 
 create policy "Users can update own profile" on public.users
   for update using (auth.uid() = id);

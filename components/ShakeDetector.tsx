@@ -9,7 +9,9 @@ export default function ShakeDetector() {
     useEffect(() => {
         let lastX = 0, lastY = 0, lastZ = 0;
         let lastTime = Date.now();
+        let lastShakeTime = 0;
         const SHAKE_THRESHOLD = 30;
+        const SHAKE_COOLDOWN = 2000; // 2-second cooldown between shakes
 
         const handleMotion = (e: DeviceMotionEvent) => {
             const acc = e.accelerationIncludingGravity;
@@ -24,7 +26,8 @@ export default function ShakeDetector() {
             const deltaZ = Math.abs(acc.z - lastZ);
             const speed = (deltaX + deltaY + deltaZ) / (timeDiff / 1000);
 
-            if (speed > SHAKE_THRESHOLD) {
+            if (speed > SHAKE_THRESHOLD && (now - lastShakeTime) > SHAKE_COOLDOWN) {
+                lastShakeTime = now;
                 router.push('/capture');
             }
 
